@@ -5,34 +5,21 @@ import BottomNavigation from '../../components/BottomNavigation';
 import { toast } from 'sonner';
 import { supabase } from '../../lib/supabase';
 import NotificationModal from '../../components/NotificationModal';
-import NotificationBell from '../../components/NotificationBell';
+import NotificationSino from '../../components/NotificationSino';
 import MenuButton from '../../components/MenuButton';
 import { maskCurrency, parseCurrency } from '../../lib/utils';
 import imageCompression from 'browser-image-compression';
-import { z, ZodError } from 'zod';
-
-const productSchema = z.object({
-  name: z.string().min(1, "Nome é obrigatório").max(100, "Nome muito longo"),
-  brand: z.string().optional(),
-  category: z.string().min(1, "Categoria é obrigatória"),
-  sku: z.string().min(1, "SKU é obrigatório"),
-  description: z.string().optional(),
-  cost_price: z.number().min(0.01, "Preço de custo deve ser positivo"),
-  sale_price: z.number().min(0.01, "Preço de venda deve ser positivo"),
-  stock: z.number().int().min(0, "Estoque deve ser >= 0"),
-  published: z.boolean(),
-  featured: z.boolean(),
-  is_kit: z.boolean(),
-});
 
 export default function AdminAddProduct() {
   const navigate = useNavigate();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [costPrice, setCostPrice] = useState('');
   const [salePrice, setSalePrice] = useState('');
+  const [hasDiscount, setHasDiscount] = useState(false);
   const [discount, setDiscount] = useState<number | ''>('');
   const [stock, setStock] = useState<number | ''>('');
   const [sku, setSku] = useState('');
+  const [model, setModel] = useState('');
   const [individualIds, setIndividualIds] = useState<string[]>([]);
   const [category, setCategory] = useState('');
   const [colors, setColors] = useState('');
@@ -103,15 +90,8 @@ export default function AdminAddProduct() {
   const [uploading, setUploading] = useState(false);
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []) as File[];
+    const files = Array.from(e.target.files || []);
     if (files.length > 0) {
-      const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
-      for (const file of files) {
-        if (!allowedTypes.includes(file.type)) {
-          toast.error(`Tipo de arquivo não permitido: ${file.type}. Use apenas JPEG, PNG ou WebP.`);
-          return;
-        }
-      }
       setImageFiles(prev => [...prev, ...files]);
       
       files.forEach((file: File) => {
@@ -189,12 +169,13 @@ export default function AdminAddProduct() {
 
       // 2. Save Product
       const sPrice = parseCurrency(salePrice);
-      const dPercent = Number(discount) || 0;
+      const dPercent = hasDiscount ? (Number(discount) || 0) : 0;
       const dPrice = sPrice * (1 - dPercent / 100);
 
       const productData = {
         name: formData.get('name'),
         brand: formData.get('brand'),
+        model,
         category: category,
         sku: sku,
         description: formData.get('description'),
@@ -217,30 +198,8 @@ export default function AdminAddProduct() {
         entry_date: entryDate
       };
 
-      // Validate product data
-      try {
-        productSchema.parse(productData);
-      } catch (validationError) {
-        if (validationError instanceof ZodError) {
-          toast.error(validationError.issues[0].message);
-          return;
-        }
-        throw validationError;
-      }
-
       const { data: newProduct, error } = await supabase.from('products').insert([productData]).select().single();
       if (error) throw error;
-
-      // 3. Record Inventory Movement
-      if (newProduct && Number(stock) > 0) {
-        await supabase.from('inventory_movements').insert([{
-          product_id: newProduct.id,
-          type: 'entry',
-          quantity: Number(stock),
-          date: new Date(entryDate).toISOString(),
-          description: 'Entrada inicial (Cadastro de produto)'
-        }]);
-      }
       
       setModalConfig({
         isOpen: true,
@@ -267,8 +226,8 @@ export default function AdminAddProduct() {
     <div className="min-h-screen global-bg text-surface font-body flex flex-col">
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
-      <main className="flex-1 min-w-0 p-0 pb-28 overflow-y-auto">
-        <header className="sticky top-0 z-50 flex items-center justify-between px-6 py-4 bar-fume mb-10">
+      <main className="flex-1 min-w-0 p-0 pb-28 ">
+        <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 bar-fume mb-10">
           <div className="flex items-center gap-4">
             <MenuButton onClick={() => setIsSidebarOpen(true)} />
             <div>
@@ -281,11 +240,11 @@ export default function AdminAddProduct() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <NotificationBell />
+            <NotificationSino />
           </div>
         </header>
 
-        <div className="px-5 md:px-10">
+        <div className="px-5 md:px-10 pt-24">
           <div className="mb-8">
             <h2 className="font-headline text-3xl italic">Cadastrar Produto</h2>
             <p className="text-surface/60 text-sm mt-1">Adicione uma nova peça ao catálogo da loja.</p>
@@ -312,6 +271,16 @@ export default function AdminAddProduct() {
                         required 
                         className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors" 
                         placeholder="Ex: Chanel, Hermès..." 
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Modelo</label>
+                      <input 
+                        type="text" 
+                        value={model}
+                        onChange={(e) => setModel(e.target.value)}
+                        className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors" 
+                        placeholder="Ex: LT706, Classic Flap..." 
                       />
                     </div>
                     <div className="space-y-2">
@@ -407,20 +376,45 @@ export default function AdminAddProduct() {
                       min="0" 
                     />
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Desconto (%)</label>
-                    <input 
-                      type="number" 
-                      inputMode="decimal"
-                      value={discount}
-                      onChange={(e) => setDiscount(e.target.value === '' ? '' : Number(e.target.value))}
-                      className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors" 
-                      placeholder="0" 
-                      min="0" 
-                      max="100"
-                    />
+
+                  <div className="md:col-span-2 space-y-4">
+                    <div className="flex items-center justify-between p-4 rounded-xl bg-primary/20 border border-secondary/10">
+                      <div className="flex flex-col">
+                        <span className="text-sm text-surface">Oferecer Desconto?</span>
+                        <p className="text-[10px] text-surface/40 italic">Ative para definir uma porcentagem de desconto</p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="sr-only peer"
+                          checked={hasDiscount}
+                          onChange={(e) => {
+                            setHasDiscount(e.target.checked);
+                            if (!e.target.checked) setDiscount('');
+                          }}
+                        />
+                        <div className="w-11 h-6 bg-primary border border-secondary/30 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-secondary after:border-secondary after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-secondary/20"></div>
+                      </label>
+                    </div>
+
+                    {hasDiscount && (
+                      <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                        <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Desconto (%)</label>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          value={discount}
+                          onChange={(e) => setDiscount(e.target.value === '' ? '' : Number(e.target.value))}
+                          className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors"
+                          placeholder="Ex: 10"
+                          min="0"
+                          max="100"
+                        />
+                      </div>
+                    )}
                   </div>
-                  {discount && salePrice && (
+
+                  {hasDiscount && discount && salePrice && (
                     <div className="md:col-span-2 p-3 rounded-lg bg-secondary/10 border border-secondary/20">
                       <p className="text-xs text-secondary font-bold uppercase tracking-widest">
                         Preço com Desconto: R$ {(parseCurrency(salePrice) * (1 - Number(discount) / 100)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}

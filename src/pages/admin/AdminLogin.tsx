@@ -1,11 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { toast } from 'sonner';
 import NotificationModal from '../../components/NotificationModal';
+import { useAuth } from '../../contexts/AuthContext';
 
 export default function AdminLogin() {
   const navigate = useNavigate();
+  const { session } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -22,7 +24,29 @@ export default function AdminLogin() {
     type: 'error'
   });
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  const isSupabaseConfigured = !!import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+  // Force logout on initial mount if they visit the login page, but allow them to log in
+  useEffect(() => {
+    const checkInitialSession = async () => {
+      const { data } = await supabase.auth.getSession();
+      if (data.session) {
+        await supabase.auth.signOut();
+      }
+    };
+    checkInitialSession();
+  }, []);
+
+  // Redirect only after successful login attempt
+  useEffect(() => {
+    if (session && isLoggingIn) {
+      navigate('/admin/dashboard');
+    }
+  }, [session, isLoggingIn, navigate]);
+
+  const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!email || !password) {
@@ -36,22 +60,39 @@ export default function AdminLogin() {
     }
 
     setLoading(true);
+    setIsLoggingIn(true);
 
     try {
+      const cleanEmail = email.trim();
+      
       const { error } = await supabase.auth.signInWithPassword({
-        email,
+        email: cleanEmail,
         password,
       });
 
       if (error) throw error;
 
       toast.success('Login realizado com sucesso!');
-      navigate('/admin/dashboard');
+      // The useEffect will handle the redirect
     } catch (error: any) {
+      setIsLoggingIn(false);
+      let errorMessage = error?.message || '';
+      if (errorMessage.includes('Email not confirmed')) {
+        errorMessage = 'Por favor, verifique seu e-mail para confirmar a conta antes de fazer login.';
+      } else if (errorMessage.includes('Invalid login credentials')) {
+        errorMessage = 'E-mail ou senha incorretos. Tente novamente.';
+      } else if (errorMessage.includes('API key')) {
+        errorMessage = 'Chave da API do Supabase ausente ou inválida.';
+      } else if (errorMessage.includes('Failed to fetch')) {
+        errorMessage = 'Erro de conexão. Verifique sua internet ou a URL do Supabase.';
+      } else if (!errorMessage) {
+        errorMessage = 'E-mail ou senha incorretos. Tente novamente.';
+      }
+
       setModalConfig({
         isOpen: true,
         title: 'Erro de Acesso',
-        message: error.message || 'E-mail ou senha incorretos. Tente novamente.',
+        message: errorMessage,
         type: 'error'
       });
     } finally {
@@ -83,10 +124,24 @@ export default function AdminLogin() {
         </div>
 
         {/* Title */}
-        <h2 className="font-headline text-4xl italic text-surface mb-12 font-light">Acesso Restrito</h2>
+        <h2 className="font-headline text-4xl italic text-surface mb-2 font-light">
+          Acesso Restrito
+        </h2>
+        <p className="text-surface/60 text-sm mb-8 text-center">
+          Faça login para acessar o painel de controle.
+        </p>
+
+        {!isSupabaseConfigured && (
+          <div className="w-full bg-red-500/10 border border-red-500/20 rounded-xl p-4 mb-6 text-center">
+            <p className="text-red-400 text-sm font-bold mb-1">Supabase não configurado!</p>
+            <p className="text-red-400/80 text-xs">
+              Configure as variáveis VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY no painel do AI Studio para habilitar o login.
+            </p>
+          </div>
+        )}
 
         {/* Form */}
-        <form onSubmit={handleLogin} className="w-full space-y-6">
+        <form onSubmit={handleAuth} className="w-full space-y-6">
           <div className="space-y-2">
             <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60 font-bold ml-1">E-mail</label>
             <input 
@@ -94,7 +149,7 @@ export default function AdminLogin() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-full py-4 px-6 text-surface focus:outline-none focus:border-secondary transition-colors placeholder:text-surface/40"
-              placeholder="admin@vallechic.com"
+              placeholder="admin@Valle Chic.com"
               required
             />
           </div>
@@ -123,7 +178,7 @@ export default function AdminLogin() {
           <div className="pt-6">
             <button 
               type="submit" 
-              disabled={loading}
+              disabled={loading || !isSupabaseConfigured}
               className="w-full flex items-center justify-center gap-3 bg-secondary text-primary font-bold text-sm uppercase tracking-widest py-5 rounded-full shadow-[0_0_40px_rgba(226,179,32,0.15)] hover:scale-[1.02] hover:shadow-[0_0_50px_rgba(226,179,32,0.25)] transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? 'Entrando...' : 'Entrar'}
@@ -141,7 +196,7 @@ export default function AdminLogin() {
           <Link to="#" className="hover:text-surface transition-colors">Contact</Link>
         </div>
         <p className="text-[8px] font-bold tracking-[0.2em] text-surface/60 uppercase">
-          © 2024 Vallechic Editorial. All rights reserved.
+          © 2024 Valle Chic Editorial. All rights reserved.
         </p>
       </footer>
 
@@ -155,3 +210,4 @@ export default function AdminLogin() {
     </div>
   );
 }
+

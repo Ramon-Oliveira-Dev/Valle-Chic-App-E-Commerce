@@ -16,7 +16,7 @@ export default function BottomNavigation() {
         { path: '/admin/sales/new', icon: 'shopping_cart', label: 'Venda' },
         { path: '/admin/dashboard', icon: 'dashboard', label: 'Dashboard' },
         { path: '/admin/inventory', icon: 'inventory_2', label: 'Estoque' },
-        { path: '/admin/finances', icon: 'payments', label: 'Finanças' },
+        { path: '/admin/finances', icon: 'savings', label: 'Finanças' },
       ];
     }
     return [
@@ -51,10 +51,13 @@ export default function BottomNavigation() {
   }, [safeActiveIndex]);
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 pb-safe h-20 bar-fume shadow-[0_-10px_40px_rgba(0,0,0,0.4)]">
+    <nav className="fixed bottom-0 left-0 right-0 z-50 safe-pb h-20 max-md:rounded-t-[24px]">
+      {/* Background container with overflow hidden to prevent leaking */}
+      <div className="absolute inset-0 bar-fume shadow-[0_-10px_40px_rgba(0,0,0,0.4)] max-md:rounded-t-[24px] max-md:overflow-hidden"></div>
+      
       {/* Navigation Items */}
-      <div className="relative h-full flex items-center justify-around px-2">
-        {/* Sliding Active Background Circle */}
+      <div className="relative h-full flex items-center justify-between px-2">
+        {/* Sliding Active Background Indicator */}
         <div className="absolute inset-0 pointer-events-none px-2 flex items-center">
           <motion.div
             initial={false}
@@ -62,7 +65,7 @@ export default function BottomNavigation() {
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
             className="w-[20%] flex justify-center"
           >
-            <div className="w-12 h-12 bg-secondary rounded-full shadow-[0_0_20px_rgba(244,192,37,0.3)]" />
+            <div className="w-12 h-12 bg-secondary/10 rounded-full border border-secondary/20" />
           </motion.div>
         </div>
 
@@ -79,11 +82,11 @@ export default function BottomNavigation() {
               <div className="flex flex-col items-center justify-center">
                 <motion.span 
                   animate={{ 
-                    color: isActive ? 'var(--theme-primary)' : '#94A3B8',
+                    color: isActive ? 'var(--theme-secondary)' : '#94A3B8',
                     scale: isActive ? 1.2 : 1,
-                    y: 0 // Centered naturally by flexbox when label is hidden
+                    y: 0 
                   }}
-                  className="material-symbols-outlined text-2xl"
+                  className="material-symbols-outlined text-2xl font-light"
                   style={isActive ? { fontVariationSettings: "'FILL' 1" } : {}}
                 >
                   {item.icon}
@@ -95,7 +98,7 @@ export default function BottomNavigation() {
                     y: isActive ? 10 : 0,
                     height: isActive ? 0 : 'auto'
                   }}
-                  className="text-[10px] uppercase tracking-wider mt-1"
+                  className="text-[9px] font-sans font-medium uppercase tracking-wider mt-1 text-surface/60"
                 >
                   {item.label}
                 </motion.span>

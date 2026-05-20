@@ -4,6 +4,8 @@ import { useCartStore } from '../store/cartStore';
 import { supabase } from '../lib/supabase';
 import BottomNavigation from '../components/BottomNavigation';
 import Sidebar from '../components/Sidebar';
+import ProductImage from '../components/ProductImage';
+import { productToCartItem } from '../lib/productMetadata';
 
 export default function Maletas() {
   const navigate = useNavigate();
@@ -23,7 +25,8 @@ export default function Maletas() {
       const { data, error } = await supabase
         .from('products')
         .select('*')
-        .or('category.eq.maletas,is_kit.eq.true')
+        .eq('category', 'maletas')
+        .neq('is_kit', true)
         .eq('published', true)
         .gt('stock', 0);
 
@@ -79,27 +82,27 @@ export default function Maletas() {
 
         {/* Category Navigation (Same as Home) */}
         <div className="flex overflow-x-auto no-scrollbar gap-4 mb-10 pb-2 md:justify-center">
-          <Link to="/catalog" className="flex flex-col items-center gap-2 min-w-[60px]">
+          <Link to="/catalog" className="flex flex-col items-center gap-2 min-w-15">
             <div className="w-14 h-14 rounded-full bg-secondary/5 flex items-center justify-center border border-secondary/5 glass-card">
               <span className="material-symbols-outlined text-secondary/60 text-xl">shopping_bag</span>
             </div>
             <span className="text-[9px] uppercase tracking-[0.15em] text-surface/40">Bolsas</span>
           </Link>
-          <Link to="/maletas" className="flex flex-col items-center gap-2 min-w-[60px]">
+          <Link to="/maletas" className="flex flex-col items-center gap-2 min-w-15">
             <div className="w-14 h-14 rounded-full bg-secondary/10 flex items-center justify-center border border-secondary/5 glass-card active">
               <span className="material-symbols-outlined text-secondary text-xl">business_center</span>
             </div>
             <span className="text-[9px] uppercase tracking-[0.15em] text-surface font-bold">Maletas</span>
           </Link>
-          <Link to="/carteiras" className="flex flex-col items-center gap-2 min-w-[60px]">
+          <Link to="/carteiras" className="flex flex-col items-center gap-2 min-w-15">
             <div className="w-14 h-14 rounded-full bg-secondary/5 flex items-center justify-center border border-secondary/5 glass-card">
               <span className="material-symbols-outlined text-secondary/60 text-xl">wallet</span>
             </div>
             <span className="text-[9px] uppercase tracking-[0.15em] text-surface/40">Carteiras</span>
           </Link>
-          <Link to="/acessorios" className="flex flex-col items-center gap-2 min-w-[60px]">
+          <Link to="/acessorios" className="flex flex-col items-center gap-2 min-w-15">
             <div className="w-14 h-14 rounded-full bg-secondary/5 flex items-center justify-center border border-secondary/5 glass-card">
-              <span className="material-symbols-outlined text-secondary/60 text-xl">diamond</span>
+              <span className="material-symbols-outlined text-secondary/60 text-xl">styler</span>
             </div>
             <span className="text-[9px] uppercase tracking-[0.15em] text-surface/40">Acessórios</span>
           </Link>
@@ -112,52 +115,76 @@ export default function Maletas() {
             </div>
           ) : maletas.length > 0 ? maletas.map((item) => (
             <div key={item.id} className="glass-card rounded-3xl overflow-hidden group shadow-2xl">
-              <Link to={`/product/${item.id}`} className="block relative aspect-[16/10]">
-                <img 
+              <Link to={`/product/${item.id}`} className="block relative aspect-16/10">
+                <ProductImage 
                   src={item.image_url || item.img || 'https://picsum.photos/seed/kit/800/500'} 
                   alt={item.name}
-                  className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                  className="transition-opacity duration-700"
                   referrerPolicy="no-referrer"
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-primary via-transparent to-transparent"></div>
+                <div className="absolute inset-0 bg-linear-to-t from-primary via-transparent to-transparent"></div>
                 <div className="absolute top-4 right-4 flex flex-col gap-2 items-end">
                   <span className="bg-secondary/90 text-primary text-[10px] font-bold uppercase tracking-widest px-4 py-1.5 rounded-full shadow-lg">
                     {item.is_kit ? 'Conjunto Premium' : 'Premium'}
                   </span>
-                  {item.discount && item.discount > 0 && (
+                  {item.discount > 0 ? (
                     <span className="bg-red-800/90 text-white px-3 py-1 text-[10px] tracking-widest uppercase font-bold rounded-full shadow-lg">-{item.discount}% OFF</span>
-                  )}
+                  ) : null}
                 </div>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    addItem(productToCartItem(
+                      item,
+                      item.discount > 0
+                        ? (item.discounted_price ?? (item.sale_price ? item.sale_price * (1 - item.discount / 100) : item.sale_price))
+                        : item.sale_price
+                    ));
+                  }}
+                  disabled={item.stock <= 0}
+                  className={`absolute bottom-4 right-4 flex items-center justify-center w-14 h-14 rounded-full shadow-2xl transition-transform duration-200 ${item.stock > 0 ? 'bg-secondary text-primary hover:scale-105' : 'bg-surface/10 text-surface/40 cursor-not-allowed'} border border-secondary/20`}
+                >
+                  <span className="material-symbols-outlined text-xl">shopping_cart</span>
+                </button>
               </Link>
               <div className="p-6">
                 <Link to={`/product/${item.id}`} className="flex justify-between items-start mb-2 group/title">
                   <h3 className="font-headline text-2xl text-surface group-hover/title:text-secondary transition-colors">{item.name}</h3>
                   <div className="text-right">
                     <p className="text-secondary font-bold text-xl">
-                      R$ {(item.discount && item.discount > 0 ? item.discounted_price : item.sale_price)?.toLocaleString('pt-BR')}
+                      R$ {(item.discount > 0
+                        ? (item.discounted_price ?? (item.sale_price ? item.sale_price * (1 - item.discount / 100) : item.sale_price)) 
+                        : item.sale_price)?.toLocaleString('pt-BR')}
                     </p>
-                    {item.discount && item.discount > 0 && (
-                      <p className="text-xs text-surface/40 line-through">R$ {item.sale_price?.toLocaleString('pt-BR')}</p>
-                    )}
+                    {item.discount > 0 && item.sale_price ? (
+                      <p className="text-xs text-surface/40 line-through">R$ {item.sale_price.toLocaleString('pt-BR')}</p>
+                    ) : null}
                   </div>
                 </Link>
                 <p className="text-surface/60 text-sm mb-6 leading-relaxed">{item.description}</p>
                 <button 
-                  onClick={() => addItem({ 
-                    id: item.id, 
-                    name: item.name, 
-                    price: item.discount && item.discount > 0 ? item.discounted_price : item.sale_price, 
-                    image: item.image_url || item.img 
-                  })}
-                  className="w-full glass-button py-4 rounded-xl flex items-center justify-center gap-2 active:scale-[0.98] transition-all shadow-lg shadow-secondary/20 font-bold"
+                  onClick={() => addItem(productToCartItem(
+                    item,
+                    item.discount > 0
+                      ? (item.discounted_price ?? (item.sale_price ? item.sale_price * (1 - item.discount / 100) : item.sale_price))
+                      : item.sale_price
+                  ))}
+                  disabled={item.stock <= 0}
+                  className={`w-full inline-flex items-center justify-center gap-2 px-6 py-4 rounded-full text-sm font-bold uppercase tracking-[0.2em] transition-all duration-200 ${
+                    item.stock > 0
+                      ? 'bg-secondary text-primary hover:bg-secondary/90 active:scale-95 shadow-2xl shadow-secondary/20'
+                      : 'bg-surface/10 text-surface/40 cursor-not-allowed'
+                  }`}
                 >
                   <span className="material-symbols-outlined">shopping_cart</span>
-                  Adicionar à Sacola
+                  {item.stock > 0 ? 'Adicionar à Sacola' : 'Esgotado'}
                 </button>
               </div>
             </div>
           )) : (
-            <div className="text-center py-20 text-surface/40 uppercase tracking-widest italic">Nenhuma maleta ou kit disponível no momento</div>
+            <div className="text-center py-20 text-surface/40 uppercase tracking-widest italic">Nenhuma maleta disponível no momento</div>
           )}
         </div>
       </main>

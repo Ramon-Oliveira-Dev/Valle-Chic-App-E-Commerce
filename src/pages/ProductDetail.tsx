@@ -3,7 +3,10 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useCartStore } from '../store/cartStore';
 import { supabase } from '../lib/supabase';
 import BottomNavigation from '../components/BottomNavigation';
+import MenuButton from '../components/MenuButton';
 import Sidebar from '../components/Sidebar';
+import ProductImage from '../components/ProductImage';
+import { productToCartItem } from '../lib/productMetadata';
 
 export default function ProductDetail() {
   const { id } = useParams<{ id: string }>();
@@ -87,17 +90,25 @@ export default function ProductDetail() {
     ? product.images 
     : [product.image_url || product.img || 'https://picsum.photos/seed/product/800/600'];
 
+  const hasDiscount = product.discount > 0;
+  const originalPrice = product.sale_price || product.original_price;
+  const displayPrice = hasDiscount
+    ? (product.discounted_price ?? (originalPrice ? originalPrice * (1 - product.discount / 100) : originalPrice))
+    : originalPrice;
+
   return (
     <div className="global-bg text-surface font-body selection:bg-secondary/30 min-h-screen">
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
       
       {/* TopAppBar */}
-      <header className="sticky top-0 w-full z-50 flex items-center justify-between px-6 py-4 bar-fume">
-        <div className="w-10"></div> {/* Spacer to keep logo centered */}
+      <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-5 py-4 bar-fume border-b border-secondary/10 shadow-2xl shadow-slate-950/10 backdrop-blur-xl">
+        <MenuButton onClick={() => setIsSidebarOpen(true)} />
+
         <Link to="/home" className="font-headline text-2xl font-bold tracking-tighter text-surface flex items-center gap-0.5">
           <span className="material-symbols-outlined text-xl text-secondary" style={{ fontVariationSettings: "'FILL' 1" }}>favorite</span>
           <span className="uppercase">vc</span>
         </Link>
+
         <Link to="/checkout" className="text-surface hover:opacity-80 transition-opacity active:scale-95 duration-150 ease-in-out relative">
           <div className="relative">
             <span className="material-symbols-outlined">shopping_cart</span>
@@ -110,27 +121,43 @@ export default function ProductDetail() {
         </Link>
       </header>
 
-      <main className="pb-32 editorial-gradient min-h-screen max-w-5xl mx-auto">
+      <main className="pb-32 editorial-gradient min-h-screen max-w-5xl mx-auto pt-24">
         <div className="px-4 pt-4">
           {/* Main Image Display */}
-          <div className="relative aspect-[3/4] sm:aspect-[16/9] w-full rounded-2xl overflow-hidden glass-card mb-4">
-            <img 
+          <div className="relative aspect-3/4 sm:aspect-video w-full rounded-2xl overflow-hidden glass-card mb-4">
+            <ProductImage 
               src={activeImage} 
               alt={product.name}
-              className="w-full h-full object-cover transition-all duration-500"
+              className="transition-all duration-500 h-full"
+              imageClassName="object-cover"
               referrerPolicy="no-referrer"
             />
             <div className="absolute top-6 left-6 flex flex-col gap-2">
-              {product.discount && product.discount > 0 && (
+              {product.discount > 0 ? (
                 <span className="bg-red-800/90 text-white px-4 py-2 text-xs tracking-widest uppercase font-bold rounded-full shadow-xl">
                   {product.discount}% OFF
                 </span>
-              )}
-              {product.is_new && (
+              ) : null}
+              {product.is_new ? (
                 <span className="bg-secondary text-primary px-4 py-2 text-xs tracking-widest uppercase font-bold rounded-full shadow-xl">
                   Novidade
                 </span>
-              )}
+              ) : null}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => product.stock > 0 && addItem(productToCartItem(product, displayPrice))}
+              disabled={product.stock <= 0}
+              aria-label="Adicionar ao carrinho"
+              title="Adicionar ao carrinho"
+              className={`absolute right-4 bottom-4 flex items-center justify-center w-16 h-16 rounded-full shadow-2xl transition-transform duration-200 ${product.stock > 0 ? 'bg-secondary text-primary hover:scale-105' : 'bg-surface/10 text-surface/40 cursor-not-allowed'} border border-secondary/20`}
+            >
+              <span className="material-symbols-outlined text-2xl">shopping_cart</span>
+            </button>
+            <div className="absolute right-4 bottom-24 max-w-55 rounded-full bg-surface/10 border border-secondary/15 px-3 py-2 text-[11px] uppercase tracking-[0.35em] text-surface/70 shadow-lg backdrop-blur-md hidden sm:flex items-center gap-2">
+              <span className="material-symbols-outlined text-sm">touch_app</span>
+              Toque para adicionar à sacola
             </div>
           </div>
 
@@ -143,21 +170,37 @@ export default function ProductDetail() {
                   onClick={() => setActiveImage(img)}
                   className={`w-20 h-20 rounded-xl overflow-hidden shrink-0 border-2 transition-all ${activeImage === img ? 'border-secondary scale-105' : 'border-transparent opacity-60'}`}
                 >
-                  <img src={img} alt={`${product.name} ${idx + 1}`} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  <ProductImage src={img} alt={`${product.name} ${idx + 1}`} referrerPolicy="no-referrer" />
                 </button>
               ))}
             </div>
           )}
 
           <div className="px-2">
-            <p className="text-secondary text-xs uppercase tracking-[0.3em] font-bold mb-2">{product.brand || 'Vallechic'}</p>
+            <p className="text-secondary text-xs uppercase tracking-[0.3em] font-bold mb-2">{product.brand || 'Valle Chic'}</p>
             <h2 className="font-headline text-4xl text-surface mb-4 leading-tight">{product.name}</h2>
             
-            <div className="flex items-baseline gap-4 mb-8">
-              <span className="text-3xl font-headline italic text-secondary">R$ {product.sale_price?.toLocaleString('pt-BR')}</span>
-              {product.discount && product.discount > 0 && product.original_price && (
-                <span className="text-lg text-surface/40 line-through">R$ {product.original_price?.toLocaleString('pt-BR')}</span>
-              )}
+            <div className="flex items-center gap-4 mb-4 flex-wrap">
+              <span className="text-3xl font-headline italic text-secondary">
+                R$ {displayPrice?.toLocaleString('pt-BR')}
+              </span>
+              {hasDiscount && originalPrice ? (
+                <div className="flex items-center gap-3">
+                  <span className="text-lg text-surface/40 line-through">
+                    R$ {originalPrice.toLocaleString('pt-BR')}
+                  </span>
+                  <span className="px-3 py-1 rounded-full text-xs font-bold tracking-widest bg-red-800/90 text-white">
+                    -{product.discount}% OFF
+                  </span>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex items-center gap-2 mb-8">
+              <span className={`w-2 h-2 rounded-full ${product.stock > 0 ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
+              <span className="text-xs uppercase tracking-widest font-bold text-surface/60">
+                {product.stock > 0 ? `${product.stock} em estoque` : 'Sem estoque'}
+              </span>
             </div>
 
             <div className="glass-card p-6 rounded-2xl mb-8 border border-secondary/10">
@@ -167,27 +210,27 @@ export default function ProductDetail() {
               </p>
             </div>
 
-            <div className="grid grid-cols-1 gap-4">
-              {product.stock > 0 ? (
-                <button 
-                  onClick={() => addItem({ id: product.id, name: product.name, price: product.sale_price, image: product.image_url || product.img })}
-                  className="w-full glass-button py-5 rounded-2xl flex items-center justify-center gap-3 active:scale-[0.98] transition-all shadow-2xl shadow-secondary/20 font-bold text-lg"
-                >
-                  <span className="material-symbols-outlined">shopping_cart</span>
-                  Adicionar à Sacola
-                </button>
-              ) : (
-                <div className="w-full bg-primary/40 text-surface/40 py-5 rounded-2xl flex items-center justify-center gap-3 cursor-not-allowed border border-surface/10">
-                  <span className="material-symbols-outlined">block</span>
-                  Esgotado
-                </div>
-              )}
+            <div className="grid grid-cols-2 gap-4">
+              <button
+                type="button"
+                onClick={() => product.stock > 0 && addItem(productToCartItem(product, displayPrice))}
+                disabled={product.stock <= 0}
+                className={`w-full inline-flex items-center justify-center gap-2 px-6 py-5 rounded-full text-sm font-bold uppercase tracking-[0.2em] shadow-2xl transition-all duration-200 ${
+                  product.stock > 0
+                    ? 'bg-secondary text-primary hover:bg-secondary/90 active:scale-95'
+                    : 'bg-surface/10 text-surface/40 cursor-not-allowed'
+                }`}
+              >
+                <span className="material-symbols-outlined">shopping_cart</span>
+                Adicionar
+              </button>
               
               <Link 
                 to="/catalog"
-                className="w-full border border-secondary/20 py-4 rounded-2xl flex items-center justify-center text-surface/60 text-sm font-medium hover:bg-secondary/5 transition-colors"
+                className="w-full inline-flex items-center justify-center gap-2 px-6 py-5 rounded-full border border-secondary/20 bg-white/5 text-surface/90 text-sm font-bold uppercase tracking-[0.2em] hover:bg-secondary/10 transition-all duration-200"
               >
-                Continuar Comprando
+                <span className="material-symbols-outlined">arrow_back</span>
+                Voltar
               </Link>
             </div>
           </div>
@@ -199,12 +242,24 @@ export default function ProductDetail() {
             <h4 className="font-headline text-2xl text-surface mb-6">Você também pode gostar</h4>
             <div className="flex overflow-x-auto no-scrollbar gap-4 pb-4">
               {suggestedProducts.map(p => (
-                <Link key={p.id} to={`/product/${p.id}`} className="shrink-0 w-[40vw] sm:w-[160px]">
-                  <div className="aspect-[3/4] rounded-xl overflow-hidden glass-card mb-2">
-                    <img src={p.image_url || p.img} alt={p.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                <Link key={p.id} to={`/product/${p.id}`} className="shrink-0 w-[40vw] sm:w-40">
+                  <div className="aspect-3/4 rounded-xl overflow-hidden glass-card mb-2">
+                    <ProductImage src={p.image_url || p.img} alt={p.name} referrerPolicy="no-referrer" />
+                    {p.discount > 0 ? (
+                      <div className="absolute top-2 left-2">
+                        <span className="bg-red-800/90 text-white px-2 py-1 text-[9px] tracking-widest uppercase font-bold rounded-sm">
+                          -{p.discount}% OFF
+                        </span>
+                      </div>
+                    ) : null}
                   </div>
                   <p className="text-[10px] text-surface/80 font-medium truncate">{p.name}</p>
-                  <p className="text-secondary text-xs font-headline italic">R$ {p.sale_price?.toLocaleString('pt-BR')}</p>
+                  <p className="text-secondary text-xs font-headline italic">
+                    R$ {(p.discount > 0 ? (p.discounted_price ?? (p.sale_price ? p.sale_price * (1 - p.discount / 100) : p.sale_price)) : p.sale_price)?.toLocaleString('pt-BR')}
+                  </p>
+                  {p.discount > 0 && p.sale_price ? (
+                    <p className="text-[10px] text-surface/40 line-through">R$ {p.sale_price.toLocaleString('pt-BR')}</p>
+                  ) : null}
                 </Link>
               ))}
             </div>

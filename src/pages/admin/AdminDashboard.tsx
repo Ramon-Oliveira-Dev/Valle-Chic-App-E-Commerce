@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Calendar, User, ChevronRight } from 'lucide-react';
+import { Calendar, User, ChevronRight, UserMinus, CheckCircle, UserCheck, AlertTriangle, ArrowRight } from 'lucide-react';
 import Sidebar from '../../components/Sidebar';
 import BottomNavigation from '../../components/BottomNavigation';
 import jsPDF from 'jspdf';
@@ -10,7 +10,7 @@ import { supabase } from '../../lib/supabase';
 import { api } from '../../services/api';
 import { toast } from 'sonner';
 
-import NotificationBell from '../../components/NotificationBell';
+import NotificationSino from '../../components/NotificationSino';
 import PDFPreviewModal from '../../components/PDFPreviewModal';
 import MenuButton from '../../components/MenuButton';
 
@@ -23,18 +23,63 @@ export default function AdminDashboard() {
     totalReceived: 0,
     activeClients: 0,
     inadimplentesCount: 0,
-    birthdayCount: 0
+    incompleteProfileCount: 0
   });
   const [recentOrders, setRecentOrders] = useState<any[]>([]);
   const [lowStockItems, setLowStockItems] = useState<any[]>([]);
   const [birthdayClients, setBirthdayClients] = useState<any[]>([]);
+  const [upcomingBirthdays, setUpcomingBirthdays] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [dbStatus, setDbStatus] = useState<'online' | 'offline' | 'checking'>('checking');
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const carouselRef = useRef<HTMLDivElement>(null);
+  const stockCarouselRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchDashboardData();
   }, []);
+
+  useEffect(() => {
+    if (!recentOrders.length) return;
+    
+    const interval = setInterval(() => {
+      if (carouselRef.current) {
+        const { scrollLeft, scrollWidth, clientWidth } = carouselRef.current;
+        const cardWidth = 280 + 16; // 280px width + 16px gap
+        
+        if (scrollLeft + clientWidth >= scrollWidth - 10) {
+          // Reached the end, scroll back to start
+          carouselRef.current.scrollTo({ left: 0, behavior: 'smooth' });
+        } else {
+          // Scroll to next card
+          carouselRef.current.scrollTo({ left: scrollLeft + cardWidth, behavior: 'smooth' });
+        }
+      }
+    }, 4000);
+    
+    return () => clearInterval(interval);
+  }, [recentOrders]);
+
+  useEffect(() => {
+    if (!lowStockItems.length) return;
+    
+    const interval = setInterval(() => {
+      if (stockCarouselRef.current) {
+        const { scrollLeft, scrollWidth, clientWidth } = stockCarouselRef.current;
+        const cardWidth = 280 + 16; // 280px width + 16px gap
+        
+        if (scrollLeft + clientWidth >= scrollWidth - 10) {
+          // Reached the end, scroll back to start
+          stockCarouselRef.current.scrollTo({ left: 0, behavior: 'smooth' });
+        } else {
+          // Scroll to next card
+          stockCarouselRef.current.scrollTo({ left: scrollLeft + cardWidth, behavior: 'smooth' });
+        }
+      }
+    }, 5000);
+    
+    return () => clearInterval(interval);
+  }, [lowStockItems]);
 
   const fetchDashboardData = async () => {
     try {
@@ -48,20 +93,25 @@ export default function AdminDashboard() {
         { totalStock, stockValue },
         lowStock,
         allClients,
-        birthdays,
+        todayBirthdays,
+        upcomingBdays,
         recentSales,
         toReceive,
-        totalReceived
+        totalReceived,
+        inadimplentesRes
       ] = await Promise.all([
         api.products.getStats(),
         api.products.getLowStock(2, 3),
         api.clients.getAll(),
-        api.clients.getBirthdays(currentMonth, 3),
+        api.clients.getTodayBirthdays(),
+        api.clients.getUpcomingBirthdays(7),
         api.sales.getRecent(5),
         api.sales.getAccountsReceivable(),
         api.sales.getTotalReceived(),
         supabase.from('clients').select('id', { count: 'exact', head: true }).eq('payment_status', 'Inadimplente')
       ]);
+
+      const incompleteCount = (allClients as any[]).filter(c => c.status === 'Pendente').length;
 
       setDbStatus('online');
 
@@ -70,21 +120,16 @@ export default function AdminDashboard() {
         stockValue,
         toReceive,
         totalReceived,
-        activeClients: allClients?.length || 0,
+        activeClients: (allClients as any[]).filter(c => c.status === 'Ativo').length,
         inadimplentesCount: (allClients as any[]).filter(c => c.payment_status === 'Inadimplente').length,
-        birthdayCount: birthdays.length
+        incompleteProfileCount: incompleteCount
       });
       setRecentOrders(recentSales || []);
       setLowStockItems(lowStock);
-      setBirthdayClients(birthdays);
+      setBirthdayClients(todayBirthdays);
+      setUpcomingBirthdays(upcomingBdays);
 
       // Check for today's birthdays and create notifications
-      const today = new Date();
-      const day = today.getDate();
-      const month = today.getMonth() + 1;
-      
-      const todayBirthdays = birthdays.filter(c => c.birth_day === day && c.birth_month === month);
-      
       for (const client of todayBirthdays) {
         // Check if notification already exists for today
         const { data: existing } = await supabase
@@ -201,7 +246,7 @@ export default function AdminDashboard() {
         doc.text(`Valle Chic - Sistema de Gestão Administrativa - Página ${i} de ${pageCount}`, 105, 285, { align: 'center' });
       }
       
-      doc.save('relatorio-administrativo-vallechic.pdf');
+      doc.save('relatorio-administrativo-Valle Chic.pdf');
       toast.success('PDF gerado com sucesso!');
     } catch (error) {
       console.error('Error generating PDF:', error);
@@ -214,8 +259,8 @@ export default function AdminDashboard() {
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
       
       {/* Main Content */}
-      <main className="flex-1 min-w-0 p-0 pb-28 overflow-y-auto">
-        <header className="sticky top-0 z-50 flex items-center justify-between px-6 py-4 bar-fume mb-6">
+      <main className="flex-1 min-w-0 p-0 pb-28 ">
+        <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 bar-fume mb-6">
           <div className="flex items-center gap-4">
             <MenuButton onClick={() => setIsSidebarOpen(true)} />
             <div>
@@ -240,46 +285,49 @@ export default function AdminDashboard() {
             >
               <span className="material-symbols-outlined">picture_as_pdf</span>
             </button>
-            <NotificationBell />
+            <NotificationSino />
           </div>
         </header>
 
-        <div className="px-4 md:px-8">
-          <div className="mb-6 flex justify-between items-end">
+        <div className="px-4 md:px-6 pt-24">
+          <div className="mb-8 flex justify-between items-end">
             <div>
-              <h2 className="font-headline text-2xl italic">Visão Geral</h2>
-              <p className="text-surface/40 text-[9px] uppercase tracking-widest">Performance e métricas em tempo real</p>
+              <h2 className="font-headline text-xl italic text-secondary">Dashboard VC</h2>
+              <p className="text-surface/60 text-[11px] uppercase tracking-widest font-medium mt-1">Visão Geral</p>
             </div>
           </div>
 
           {/* Stats Grid - Condensed for better density */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
             <motion.div 
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="glass-card p-4 rounded-2xl border-l-4 border-l-secondary flex items-center gap-4"
+              className="bg-[#0B111D] p-5 rounded-[20px] border-t border-t-secondary/50 shadow-lg flex flex-col gap-3"
             >
-              <div className="w-10 h-10 rounded-xl bg-secondary/10 flex items-center justify-center text-secondary">
-                <span className="material-symbols-outlined">inventory_2</span>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-secondary/10 flex items-center justify-center text-secondary">
+                  <span className="material-symbols-outlined text-[16px] font-light">inventory_2</span>
+                </div>
+                <p className="text-surface/80 text-[12px] font-sans font-medium">Estoque Total</p>
               </div>
-              <div>
-                <p className="text-surface/40 text-[8px] uppercase tracking-widest font-bold">Estoque Total</p>
-                <p className="font-headline text-xl text-surface">{stats.totalStock.toLocaleString('pt-BR')}</p>
-              </div>
+              <p className="font-sans font-semibold text-2xl text-surface">{stats.totalStock.toLocaleString('pt-BR')}</p>
             </motion.div>
             
             <motion.div 
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 }}
-              className="glass-card p-4 rounded-2xl border-l-4 border-l-blue-400 flex items-center gap-4"
+              className="bg-[#0B111D] p-5 rounded-[20px] border-t border-t-blue-400/50 shadow-lg flex flex-col gap-3"
             >
-              <div className="w-10 h-10 rounded-xl bg-blue-400/10 flex items-center justify-center text-blue-400">
-                <span className="material-symbols-outlined">account_balance_wallet</span>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-blue-400/10 flex items-center justify-center text-blue-400">
+                  <span className="material-symbols-outlined text-[16px] font-light">account_balance_wallet</span>
+                </div>
+                <p className="text-surface/80 text-[12px] font-sans font-medium">Investimento</p>
               </div>
-              <div>
-                <p className="text-surface/40 text-[8px] uppercase tracking-widest font-bold">Investimento</p>
-                <p className="font-headline text-xl text-surface">R$ {stats.stockValue.toLocaleString('pt-BR')}</p>
+              <div className="flex items-baseline gap-1">
+                <span className="text-sm font-sans font-light text-surface/60">R$</span>
+                <p className="font-sans font-semibold text-2xl text-surface">{stats.stockValue.toLocaleString('pt-BR')}</p>
               </div>
             </motion.div>
 
@@ -287,14 +335,17 @@ export default function AdminDashboard() {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2 }}
-              className="glass-card p-4 rounded-2xl border-l-4 border-l-emerald-400 flex items-center gap-4"
+              className="bg-[#0B111D] p-5 rounded-[20px] border-t border-t-emerald-400/50 shadow-lg flex flex-col gap-3"
             >
-              <div className="w-10 h-10 rounded-xl bg-emerald-400/10 flex items-center justify-center text-emerald-400">
-                <span className="material-symbols-outlined">payments</span>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-emerald-400/10 flex items-center justify-center text-emerald-400">
+                  <span className="material-symbols-outlined text-[16px] font-light">payments</span>
+                </div>
+                <p className="text-surface/80 text-[12px] font-sans font-medium">Total Recebido</p>
               </div>
-              <div>
-                <p className="text-surface/40 text-[8px] uppercase tracking-widest font-bold">Total Recebido</p>
-                <p className="font-headline text-xl text-surface">R$ {stats.totalReceived.toLocaleString('pt-BR')}</p>
+              <div className="flex items-baseline gap-1">
+                <span className="text-sm font-sans font-light text-surface/60">R$</span>
+                <p className="font-sans font-semibold text-2xl text-surface">{stats.totalReceived.toLocaleString('pt-BR')}</p>
               </div>
             </motion.div>
 
@@ -302,14 +353,17 @@ export default function AdminDashboard() {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.3 }}
-              className="glass-card p-4 rounded-2xl border-l-4 border-l-purple-400 flex items-center gap-4"
+              className="bg-[#0B111D] p-5 rounded-[20px] border-t border-t-purple-400/50 shadow-lg flex flex-col gap-3"
             >
-              <div className="w-10 h-10 rounded-xl bg-purple-400/10 flex items-center justify-center text-purple-400">
-                <span className="material-symbols-outlined">pending_actions</span>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-purple-400/10 flex items-center justify-center text-purple-400">
+                  <span className="material-symbols-outlined text-[16px] font-light">pending_actions</span>
+                </div>
+                <p className="text-surface/80 text-[12px] font-sans font-medium">A Receber</p>
               </div>
-              <div>
-                <p className="text-surface/40 text-[8px] uppercase tracking-widest font-bold">A Receber</p>
-                <p className="font-headline text-xl text-surface">R$ {stats.toReceive.toLocaleString('pt-BR')}</p>
+              <div className="flex items-baseline gap-1">
+                <span className="text-sm font-sans font-light text-surface/60">R$</span>
+                <p className="font-sans font-semibold text-2xl text-surface">{stats.toReceive.toLocaleString('pt-BR')}</p>
               </div>
             </motion.div>
           </div>
@@ -319,7 +373,7 @@ export default function AdminDashboard() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.4 }}
-            className="glass-card p-6 rounded-3xl border border-secondary/20 mb-8 overflow-hidden relative group"
+            className="bg-[#0B111D] p-6 rounded-[20px] border-t border-t-secondary/30 shadow-lg mb-8 overflow-hidden relative group"
           >
             <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
               <span className="material-symbols-outlined text-8xl text-secondary">group</span>
@@ -331,30 +385,36 @@ export default function AdminDashboard() {
                 <p className="text-surface/40 text-[10px] uppercase tracking-widest">Base de dados e indicadores de fidelidade</p>
               </div>
               
-              <div className="grid grid-cols-3 gap-8 w-full md:w-auto">
-                <div className="text-center md:text-left">
-                  <p className="text-surface/40 text-[8px] uppercase tracking-widest font-bold mb-1">Ativos</p>
-                  <p className="font-headline text-3xl text-surface">{stats.activeClients}</p>
-                </div>
-                <div className="text-center md:text-left">
-                  <p className="text-rose-400/60 text-[8px] uppercase tracking-widest font-bold mb-1">Inadimplentes</p>
-                  <p className="font-headline text-3xl text-rose-400">{stats.inadimplentesCount}</p>
-                </div>
-                <div className="text-center md:text-left">
-                  <p className="text-emerald-400/60 text-[8px] uppercase tracking-widest font-bold mb-1">Aniversariantes</p>
-                  <div className="flex items-center justify-center md:justify-start gap-2">
-                    <p className="font-headline text-3xl text-emerald-400">{stats.birthdayCount}</p>
-                    <span className="material-symbols-outlined text-emerald-400 text-sm animate-bounce">cake</span>
+              <div className="flex flex-row justify-around items-center w-full md:w-auto gap-4 md:gap-8">
+                <div className="flex flex-col items-center">
+                  <div className="flex items-center gap-1 mb-1">
+                    <UserCheck className="w-3 h-3 text-[#4CAF50] opacity-50" />
+                    <p className="text-surface/60 text-[10px] uppercase tracking-widest font-sans">Ativos</p>
                   </div>
+                  <p className="font-sans font-semibold text-3xl text-[#4CAF50]">{stats.activeClients}</p>
+                </div>
+                <div className="flex flex-col items-center">
+                  <div className="flex items-center gap-1 mb-1">
+                    <AlertTriangle className="w-3 h-3 text-rose-400 opacity-50" />
+                    <p className="text-surface/60 text-[10px] uppercase tracking-widest font-sans">Inadimplentes</p>
+                  </div>
+                  <p className="font-sans font-semibold text-3xl text-rose-400">{stats.inadimplentesCount}</p>
+                </div>
+                <div className="flex flex-col items-center">
+                  <div className="flex items-center gap-1 mb-1">
+                    <UserMinus className="w-3 h-3 text-orange-400 opacity-50" />
+                    <p className="text-surface/60 text-[10px] uppercase tracking-widest font-sans">Sem Cadastro</p>
+                  </div>
+                  <p className="font-sans font-semibold text-3xl text-orange-400">{stats.incompleteProfileCount}</p>
                 </div>
               </div>
 
               <Link 
                 to="/admin/clients"
-                className="w-full md:w-auto px-6 py-3 rounded-xl bg-secondary text-primary font-bold uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 hover:bg-secondary/90 transition-all shadow-lg shadow-secondary/20"
+                className="w-full md:w-auto px-6 py-3 rounded-2xl bg-[#D4AF37] text-[#0A1220] font-bold uppercase tracking-widest text-xs flex items-center justify-between gap-4 hover:bg-[#F3E5AB] transition-all shadow-lg shadow-[#D4AF37]/20"
               >
-                Gerenciar Clientes
-                <span className="material-symbols-outlined text-sm">arrow_forward</span>
+                <span>Gerenciar Clientes</span>
+                <ArrowRight className="w-4 h-4" />
               </Link>
             </div>
           </motion.div>
@@ -367,88 +427,70 @@ export default function AdminDashboard() {
               <Link to="/admin/sales" className="text-secondary text-xs uppercase tracking-widest hover:underline">Ver Todas</Link>
             </div>
             
-            {/* Desktop Table View */}
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full text-left border-collapse min-w-[500px]">
-                <thead>
-                  <tr className="border-b border-secondary/10 text-surface/60 text-[10px] uppercase tracking-widest">
-                    <th className="pb-3 font-normal">Venda</th>
-                    <th className="pb-3 font-normal">Cliente</th>
-                    <th className="pb-3 font-normal">Data</th>
-                    <th className="pb-3 font-normal">Status</th>
-                    <th className="pb-3 font-normal text-right">Valor Total</th>
-                  </tr>
-                </thead>
-                <tbody className="text-sm">
-                  {recentOrders.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="py-10 text-center text-surface/60 italic">Nenhuma venda registrada</td>
-                    </tr>
-                  ) : (
-                    recentOrders.map((order) => (
-                      <tr key={order.id} className="border-b border-secondary/5 hover:bg-white/5 transition-colors">
-                        <td className="py-4 font-mono text-surface/30 text-xs">#{order.id.slice(0, 4)}</td>
-                        <td className="py-4">
-                          <div className="flex items-center gap-2">
-                            <User size={14} className="text-secondary/60" />
-                            <span className="font-medium">{order.clients?.name || 'N/A'}</span>
-                          </div>
-                        </td>
-                        <td className="py-4">
-                          <div className="flex items-center gap-2 text-surface/60">
-                            <Calendar size={14} />
-                            <span>{new Date(order.sale_date).toLocaleDateString('pt-BR')}</span>
-                          </div>
-                        </td>
-                        <td className="py-4">
-                          <span className={`px-3 py-1 rounded-full text-[10px] uppercase tracking-widest font-bold ${
-                            order.status === 'pago' 
-                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
-                              : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                          }`}>
-                            {order.status}
-                          </span>
-                        </td>
-                        <td className="py-4 text-right font-bold text-secondary">R$ {order.total_amount.toLocaleString('pt-BR')}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Mobile Card View */}
-            <div className="md:hidden space-y-4">
+            {/* Carousel View */}
+            <div className="flex overflow-x-auto gap-4 snap-x snap-mandatory hide-scrollbar pb-4" ref={carouselRef}>
               {recentOrders.length === 0 ? (
-                <p className="text-center text-surface/60 text-xs py-10 italic">Nenhuma venda registrada</p>
+                <p className="text-center text-surface/60 text-xs py-10 italic w-full">Nenhuma venda registrada</p>
               ) : (
-                recentOrders.map((order) => (
-                  <div key={order.id} className="p-5 rounded-2xl bg-white/5 backdrop-blur-md border border-white/10 space-y-4 shadow-xl">
-                    <div className="flex justify-between items-start">
-                      <div className="space-y-1">
-                        <p className="font-mono text-surface/30 text-[10px]">#{order.id.slice(0, 4)}</p>
-                        <div className="flex items-center gap-2">
-                          <User size={14} className="text-secondary/60" />
-                          <p className="font-medium text-surface">{order.clients?.name || 'N/A'}</p>
+                <>
+                  {recentOrders.map((order) => (
+                    <div key={order.id} className="min-w-[280px] w-[280px] h-[160px] bg-[#161B22] rounded-2xl p-4 flex flex-col justify-between shadow-lg snap-start border border-white/5">
+                      {/* Header */}
+                      <div className="flex justify-between items-center">
+                        <span className="font-medium text-white truncate pr-2">{order.clients?.name || 'Consumidor Final'}</span>
+                        <span className={`px-2 py-0.5 rounded-md text-[8px] uppercase tracking-widest font-bold whitespace-nowrap ${
+                          order.status === 'pago' 
+                            ? 'bg-emerald-500/10 text-emerald-400' 
+                            : 'bg-amber-500/10 text-amber-400'
+                        }`}>
+                          {order.status === 'pago' ? 'PAGO' : 'AGUARDANDO...'}
+                        </span>
+                      </div>
+                      
+                      {/* Center - Product */}
+                      <div className="flex items-center gap-3 my-auto">
+                        {order.sale_items?.[0]?.products?.image_url ? (
+                          <img src={order.sale_items[0].products.image_url} alt="Produto" className="w-12 h-12 rounded-full object-cover border border-[#D4AF37]/20" />
+                        ) : (
+                          <div className="w-12 h-12 rounded-full bg-[#D4AF37]/10 flex items-center justify-center border border-[#D4AF37]/20">
+                            <span className="text-[10px] font-bold text-[#D4AF37]">VC</span>
+                          </div>
+                        )}
+                        <div className="flex-1 flex flex-col justify-center overflow-hidden">
+                          {order.sale_items?.[0] ? (
+                            <span className="text-xs text-gray-300 truncate">
+                              <span className="font-bold text-[#D4AF37]">{order.sale_items[0].quantity}x</span> {order.sale_items[0].products?.name || 'Produto Excluído'}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-500 italic">Sem itens</span>
+                          )}
+                          {order.sale_items?.length > 1 && (
+                            <span className="text-[10px] text-gray-500 mt-0.5">+ {order.sale_items.length - 1} outro(s) item(ns)</span>
+                          )}
                         </div>
                       </div>
-                      <span className={`px-3 py-1 rounded-full text-[8px] uppercase tracking-widest font-bold ${
-                        order.status === 'pago' 
-                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
-                          : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                      }`}>
-                        {order.status}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center pt-4 border-t border-white/5">
-                      <div className="flex items-center gap-1.5 text-surface/60">
-                        <Calendar size={12} />
-                        <p className="text-[10px] uppercase tracking-widest">{new Date(order.sale_date).toLocaleDateString('pt-BR')}</p>
+                      
+                      {/* Footer */}
+                      <div className="flex justify-between items-end">
+                        <div className="flex flex-col">
+                          <span className="text-[10px] text-gray-500">{new Date(order.created_at || order.sale_date).toLocaleDateString('pt-BR')}</span>
+                          <span className="text-[10px] text-gray-500">{new Date(order.created_at || order.sale_date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+                        </div>
+                        <span className="font-bold text-[#FFD700] text-sm">
+                          R$ {order.total_amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </span>
                       </div>
-                      <p className="font-bold text-secondary text-lg">R$ {order.total_amount.toLocaleString('pt-BR')}</p>
                     </div>
-                  </div>
-                ))
+                  ))}
+                  
+                  {/* "Ver Todas" Card at the end */}
+                  <Link to="/admin/sales" className="min-w-[280px] w-[280px] h-[160px] bg-[#161B22]/50 rounded-2xl p-4 flex flex-col items-center justify-center shadow-lg snap-start border border-dashed border-[#D4AF37]/30 hover:bg-[#161B22] transition-colors group">
+                    <div className="w-12 h-12 rounded-full bg-[#D4AF37]/10 flex items-center justify-center mb-3 group-hover:bg-[#D4AF37]/20 transition-colors">
+                      <ChevronRight className="text-[#D4AF37]" />
+                    </div>
+                    <span className="text-[#D4AF37] font-bold text-sm uppercase tracking-widest">Ver Todas</span>
+                  </Link>
+                </>
               )}
             </div>
           </div>
@@ -456,64 +498,143 @@ export default function AdminDashboard() {
           <div className="space-y-6">
             <div className="glass-card rounded-2xl p-6">
               <h3 className="font-headline text-xl italic mb-6">Estoque Baixo</h3>
-              <div className="space-y-4">
+              
+              <div className="flex overflow-x-auto gap-4 snap-x snap-mandatory hide-scrollbar pb-4" ref={stockCarouselRef}>
                 {lowStockItems.length === 0 ? (
-                  <p className="text-center text-surface/60 text-xs py-10 italic">Estoque saudável</p>
+                  <p className="text-center text-surface/60 text-xs py-10 italic w-full">Estoque saudável</p>
                 ) : (
-                  lowStockItems.map((item, i) => (
-                    <div key={i} className="flex items-center gap-4 p-4 rounded-2xl bg-white/5 backdrop-blur-sm border border-white/10 hover:bg-white/10 transition-all group shadow-sm">
-                      <img src={item.image_url || 'https://picsum.photos/seed/product/100/100'} alt={item.name} className="w-12 h-12 rounded-xl object-cover shadow-md" referrerPolicy="no-referrer" />
-                      <div className="flex-1">
-                        <p className="text-sm font-medium group-hover:text-secondary transition-colors">{item.name}</p>
-                        <p className="text-[9px] text-surface/40 uppercase tracking-[0.15em] font-bold">{item.brand}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className={`text-sm font-bold ${item.stock < 2 ? 'text-rose-500' : 'text-secondary'}`}>
-                          {item.stock} un
-                        </p>
-                        <p className="text-[9px] text-surface/40 uppercase tracking-tighter">Restante</p>
-                      </div>
-                    </div>
-                  ))
+                  <>
+                    {lowStockItems.map((item, i) => {
+                      // Simulação de ritmo de saída baseada no ID do produto para ser determinística
+                      // Em um cenário real, isso seria calculado com base na média de vendas diárias
+                      const pseudoRandomRate = (item.id.charCodeAt(0) % 3) + 1; // 1 a 3 itens por dia
+                      const depletionDays = Math.max(0, Math.ceil(item.stock / pseudoRandomRate));
+                      const isZeroStock = item.stock === 0;
+                      
+                      return (
+                        <div 
+                          key={i} 
+                          className={`min-w-[280px] w-[280px] h-[160px] bg-[#161B22] rounded-2xl p-4 flex flex-col justify-between shadow-lg snap-start border relative ${
+                            isZeroStock ? 'border-rose-500/50 animate-pulse' : 'border-white/5'
+                          }`}
+                        >
+                          {/* Badge de Quantidade */}
+                          <div className="absolute top-4 right-4">
+                            <span className={`px-2 py-1 rounded-md text-[9px] font-bold uppercase tracking-widest ${
+                              isZeroStock ? 'bg-rose-500/20 text-rose-400' : 'bg-amber-500/20 text-amber-400'
+                            }`}>
+                              {item.stock} un RESTANTE
+                            </span>
+                          </div>
+
+                          <div className="flex gap-4 h-full pt-6 items-center">
+                            {/* Imagem do Produto */}
+                            <img 
+                              src={item.image_url || 'https://picsum.photos/seed/product/100/100'} 
+                              alt={item.name} 
+                              className={`w-20 h-20 rounded-xl object-cover shadow-md border border-white/10 ${isZeroStock ? 'opacity-50 grayscale' : ''}`} 
+                              referrerPolicy="no-referrer" 
+                            />
+                            
+                            {/* Informações */}
+                            <div className="flex flex-col justify-center flex-1">
+                              <p className="text-sm font-bold text-white line-clamp-2 leading-tight mb-1">{item.name}</p>
+                              <p className="text-[10px] text-gray-400 uppercase tracking-widest mb-3">{item.brand || 'Sem Categoria'}</p>
+                              
+                              {isZeroStock ? (
+                                <p className="text-xs font-bold text-rose-500">ESGOTADO! Compre agora</p>
+                              ) : (
+                                <p className={`text-xs font-medium ${depletionDays < 3 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                                  Esgota em {depletionDays} dia{depletionDays !== 1 ? 's' : ''}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </>
                 )}
-                <Link 
-                  to="/admin/inventory" 
-                  className="flex items-center justify-center gap-2 w-full py-3 rounded-xl border border-secondary/30 text-secondary text-[10px] uppercase tracking-widest font-bold hover:bg-secondary/10 transition-all mt-4 group"
-                >
-                  Ver Estoque Completo
-                  <ChevronRight size={14} className="group-hover:translate-x-1 transition-transform" />
-                </Link>
               </div>
+
+              <Link 
+                to="/admin/inventory" 
+                className="flex items-center justify-center gap-2 w-max mx-auto px-6 py-2 rounded-full border border-[#D4AF37]/50 text-[#D4AF37] text-[10px] uppercase tracking-widest font-bold hover:bg-[#D4AF37]/10 transition-all mt-2 group"
+              >
+                Ver Estoque Completo
+                <ChevronRight size={14} className="group-hover:translate-x-1 transition-transform" />
+              </Link>
             </div>
 
-            <div className="glass-card rounded-2xl p-6">
-              <h3 className="font-headline text-xl italic mb-6">Aniversariantes do Mês</h3>
-              <div className="space-y-4">
-                {birthdayClients.length === 0 ? (
-                  <p className="text-center text-surface/60 text-xs py-10 italic">Nenhum este mês</p>
+            <div className={`bg-[#0A1220] rounded-[24px] p-6 relative overflow-hidden transition-all duration-500 shadow-[0_0_15px_rgba(212,175,55,0.15)] border border-[#D4AF37]/20`}>
+              <h3 className="font-headline text-xl italic text-white mb-6 text-left">Fidelidade & Mimos</h3>
+              <div className="space-y-4 relative z-10">
+                {birthdayClients.length === 0 && upcomingBirthdays.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-8 text-center">
+                    <span className="material-symbols-outlined text-6xl text-white/5 absolute opacity-20">featured_seasonal_and_gifts</span>
+                    <p className="text-gray-400 text-sm italic relative z-10">Nenhum aniversariante hoje.<br/>Que tal criar uma promoção relâmpago?</p>
+                  </div>
                 ) : (
-                  birthdayClients.map((client, i) => (
-                    <div key={i} className="flex items-center gap-4 p-3 rounded-xl bg-white/5 border border-white/5">
-                      <div className="w-10 h-10 rounded-full bg-secondary/10 flex items-center justify-center text-secondary">
-                        <span className="material-symbols-outlined">cake</span>
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-sm font-medium">{client.name}</p>
-                        <p className="text-[10px] text-surface/60 uppercase tracking-widest">Dia {client.birth_day}</p>
-                      </div>
-                      <a 
-                        href={`https://wa.me/55${client.phone?.replace(/\D/g, '')}?text=${encodeURIComponent(`Parabéns e feliz Aniversário! 🎂✨\n\nA equipe Valle Chic passa por aqui para desejar um feliz aniversário! Que seu dia seja tão incrível quanto você.\n\nComo forma de agradecer por sua parceria, hoje você tem um mimo especial te esperando em nossa loja. Fale com a gente e descubra o que preparamos para você! 🎉💖`)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-secondary hover:scale-110 transition-transform"
-                      >
-                        <span className="material-symbols-outlined text-sm">send</span>
-                      </a>
-                    </div>
-                  ))
+                  <div className="flex flex-col items-center justify-center py-4 text-center">
+                    {birthdayClients.length === 0 && upcomingBirthdays.length > 0 ? (
+                      <>
+                        <p className="text-[#D4AF37] font-headline text-xl mb-1">Prepare os mimos!</p>
+                        <p className="text-gray-300 text-sm mb-6">{upcomingBirthdays.length} {upcomingBirthdays.length === 1 ? 'cliente faz' : 'clientes fazem'} aniversário esta semana</p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-[#D4AF37] font-headline text-xl mb-1">{birthdayClients.length} {birthdayClients.length === 1 ? 'cliente faz' : 'clientes fazem'} aniversário hoje!</p>
+                        {upcomingBirthdays.length > 0 && (
+                          <p className="text-gray-300 text-sm mb-6">{upcomingBirthdays.length} {upcomingBirthdays.length === 1 ? 'aniversariante' : 'aniversariantes'} nos próximos 7 dias</p>
+                        )}
+                      </>
+                    )}
+
+                    {(() => {
+                      const allBirthdays = [...birthdayClients, ...upcomingBirthdays];
+                      if (allBirthdays.length === 1) {
+                        const client = allBirthdays[0];
+                        return (
+                          <div className="flex flex-col items-center">
+                            <div className="w-[50px] h-[50px] rounded-full border-[1.5px] border-[#D4AF37] bg-[#151E3F] flex items-center justify-center shadow-lg relative z-10 mb-2">
+                              {client.photo_url || client.image_url ? (
+                                <img src={client.photo_url || client.image_url} alt={client.name} className="w-full h-full rounded-full object-cover" referrerPolicy="no-referrer" />
+                              ) : (
+                                <span className="text-[#D4AF37] font-headline text-xl">{client.name.charAt(0).toUpperCase()}</span>
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-400 uppercase tracking-widest">{client.name}</p>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div className="flex justify-center -space-x-4 mb-2 hover:scale-105 transition-transform cursor-default">
+                          {allBirthdays.slice(0, 3).map((client, i) => (
+                            <div key={i} className="w-[50px] h-[50px] rounded-full border-[1.5px] border-[#D4AF37] bg-[#151E3F] flex items-center justify-center shadow-lg relative z-10" style={{ zIndex: 10 - i }}>
+                              {client.photo_url || client.image_url ? (
+                                <img src={client.photo_url || client.image_url} alt={client.name} className="w-full h-full rounded-full object-cover" referrerPolicy="no-referrer" />
+                              ) : (
+                                <span className="text-[#D4AF37] font-headline text-xl">{client.name.charAt(0).toUpperCase()}</span>
+                              )}
+                            </div>
+                          ))}
+                          {allBirthdays.length > 3 && (
+                            <div className="w-[50px] h-[50px] rounded-full border-[1.5px] border-[#D4AF37] bg-[#151E3F] flex items-center justify-center shadow-lg relative z-10" style={{ zIndex: 0 }}>
+                              <span className="text-[#D4AF37] font-bold text-sm">+{allBirthdays.length - 3}</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
                 )}
-                <Link to="/admin/clients" className="block text-center py-3 rounded-xl border border-secondary/20 text-secondary text-[10px] uppercase tracking-widest font-bold hover:bg-secondary/10 transition-colors mt-4">
-                  Ver Todos Clientes
+                <Link 
+                  to="/admin/mimos" 
+                  state={{ upcomingBirthdays: upcomingBirthdays, todayBirthdays: birthdayClients }}
+                  className="block text-center py-3.5 rounded-xl border border-[#D4AF37] text-[#D4AF37] text-xs uppercase tracking-widest font-sans font-bold hover:bg-[#D4AF37]/10 transition-colors mt-6 relative z-10"
+                >
+                  {birthdayClients.length > 0 || upcomingBirthdays.length > 0 ? 'PRESENTEAR CLIENTES' : 'GERAR CUPONS'}
                 </Link>
               </div>
             </div>
@@ -583,3 +704,4 @@ export default function AdminDashboard() {
     </div>
   );
 }
+

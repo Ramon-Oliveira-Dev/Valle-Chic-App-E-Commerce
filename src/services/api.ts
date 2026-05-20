@@ -46,6 +46,55 @@ export const api = {
         .limit(limit);
       if (error) throw error;
       return data;
+    },
+    getTodayBirthdays: async () => {
+      const today = new Date();
+      const day = today.getDate();
+      const month = today.getMonth() + 1;
+      const { data, error } = await supabase
+        .from('clients')
+        .select('*')
+        .eq('birth_month', month)
+        .eq('birth_day', day);
+      if (error) throw error;
+      return data;
+    },
+    getUpcomingBirthdays: async (days = 7) => {
+      const { data, error } = await supabase
+        .from('clients')
+        .select('*')
+        .not('birth_month', 'is', null)
+        .not('birth_day', 'is', null);
+      if (error) throw error;
+      
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const upcoming = data.filter(client => {
+        if (!client.birth_month || !client.birth_day) return false;
+        
+        let bdayThisYear = new Date(today.getFullYear(), client.birth_month - 1, client.birth_day);
+        
+        if (bdayThisYear < today) {
+           bdayThisYear = new Date(today.getFullYear() + 1, client.birth_month - 1, client.birth_day);
+        }
+        
+        const diffTime = bdayThisYear.getTime() - today.getTime();
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        
+        return diffDays > 0 && diffDays <= days;
+      });
+      
+      // Sort by upcoming date
+      return upcoming.sort((a, b) => {
+        let bdayA = new Date(today.getFullYear(), a.birth_month! - 1, a.birth_day!);
+        if (bdayA < today) bdayA = new Date(today.getFullYear() + 1, a.birth_month! - 1, a.birth_day!);
+        
+        let bdayB = new Date(today.getFullYear(), b.birth_month! - 1, b.birth_day!);
+        if (bdayB < today) bdayB = new Date(today.getFullYear() + 1, b.birth_month! - 1, b.birth_day!);
+        
+        return bdayA.getTime() - bdayB.getTime();
+      });
     }
   },
   sales: {
@@ -54,7 +103,15 @@ export const api = {
         .from('sales')
         .select(`
           *,
-          clients (name)
+          clients (name, status),
+          sale_items (
+            quantity,
+            unit_price,
+            products (
+              name,
+              image_url
+            )
+          )
         `)
         .order('sale_date', { ascending: false })
         .limit(limit);

@@ -3,6 +3,13 @@ import { supabase } from '../lib/supabase';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 
+const toLocalDate = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export function useGlobalAlerts() {
   const { user } = useAuth();
 
@@ -47,16 +54,68 @@ export function useGlobalAlerts() {
         }
 
         // 3. Check Overdue Payments
+        const todayDate = toLocalDate(new Date());
         const { data: overdue } = await supabase
           .from('installments')
           .select('amount, clients(name)')
-          .eq('status', 'Pendente')
-          .lt('due_date', new Date().toISOString().split('T')[0]);
+          .eq('status', 'pendente')
+          .lt('due_date', todayDate);
 
         if (overdue && overdue.length > 0) {
           toast.error(`${overdue.length} Pagamentos Atrasados`, {
             description: "Verifique a seção de finanças.",
             duration: 6000,
+          });
+        }
+
+        // 4. Check Payments Due Tomorrow
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const tomorrowDate = toLocalDate(tomorrow);
+
+        const { data: dueTomorrow, error: dueTomorrowError } = await supabase
+          .from('installments')
+          .select('id, amount, due_date, clients(name)')
+          .eq('status', 'pendente')
+          .eq('due_date', tomorrowDate);
+
+        if (dueTomorrowError) throw dueTomorrowError;
+
+        if (dueTomorrow && dueTomorrow.length > 0) {
+          const { data: todayPaymentAlerts } = await supabase
+            .from('notifications')
+            .select('message')
+            .eq('type', 'pagamento')
+            .gte('created_at', `${todayDate}T00:00:00`);
+
+          const existingMessages = new Set((todayPaymentAlerts || []).map(alert => alert.message || ''));
+
+          for (const installment of dueTomorrow as any[]) {
+            const clientName = installment.clients?.name || 'Cliente';
+            const amount = Number(installment.amount || 0).toLocaleString('pt-BR', {
+              style: 'currency',
+              currency: 'BRL'
+            });
+            const dueDate = new Date(`${installment.due_date}T00:00:00`).toLocaleDateString('pt-BR');
+            const reference = `parcela:${installment.id}`;
+            const message = `${clientName} tem pagamento de ${amount} vencendo em ${dueDate}. ${reference}`;
+
+            if (existingMessages.has(message)) continue;
+
+            await supabase.from('notifications').insert([{
+              type: 'pagamento',
+              title: 'Pagamento vence amanhã',
+              message,
+              priority: 'high',
+              is_read: false
+            }]);
+
+            existingMessages.add(message);
+          }
+
+          toast.warning(`${dueTomorrow.length} pagamento(s) vencem amanhã`, {
+            description: 'Confira os alertas no sino de notificações.',
+            duration: 7000,
           });
         }
 

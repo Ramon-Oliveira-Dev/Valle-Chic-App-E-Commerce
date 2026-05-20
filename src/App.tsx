@@ -27,9 +27,12 @@ import AdminNotifications from './pages/admin/AdminNotifications';
 import AdminNewSale from './pages/admin/AdminNewSale';
 import AdminSalesHistory from './pages/admin/AdminSalesHistory';
 import AdminLogs from './pages/admin/AdminLogs';
+import AdminMimos from './pages/admin/AdminMimos';
 import ProductDetail from './pages/ProductDetail';
 import { Toaster } from 'sonner';
 import ErrorBoundary from './components/ErrorBoundary';
+import DeviceBackButton from './components/DeviceBackButton';
+import { useGlobalAlerts } from './hooks/useGlobalAlerts';
 
 // Protected Route Component
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -46,12 +49,19 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
 
+const GlobalAlertsBootstrap = () => {
+  useGlobalAlerts();
+  return null;
+};
+
 export default function App() {
   return (
     <ErrorBoundary>
       <AuthProvider>
         <ThemeProvider>
           <Router>
+            <DeviceBackButton />
+            <GlobalAlertsBootstrap />
             <Toaster position="top-right" richColors />
             <Routes>
               <Route path="/" element={<Welcome />} />
@@ -80,6 +90,7 @@ export default function App() {
               <Route path="/admin/notifications" element={<ProtectedRoute><AdminNotifications /></ProtectedRoute>} />
               <Route path="/admin/sales/new" element={<ProtectedRoute><AdminNewSale /></ProtectedRoute>} />
               <Route path="/admin/sales" element={<ProtectedRoute><AdminSalesHistory /></ProtectedRoute>} />
+              <Route path="/admin/mimos" element={<ProtectedRoute><AdminMimos /></ProtectedRoute>} />
               <Route path="/admin/logs" element={<ProtectedRoute><AdminLogs /></ProtectedRoute>} />
             </Routes>
           </Router>

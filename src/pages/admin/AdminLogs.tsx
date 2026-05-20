@@ -36,8 +36,8 @@ export default function AdminLogs() {
     <div className="min-h-screen global-bg text-surface font-body flex flex-col">
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
       
-      <main className="flex-1 min-w-0 p-0 pb-28 overflow-y-auto">
-        <header className="sticky top-0 z-50 flex items-center justify-between px-6 py-4 bar-fume mb-6">
+      <main className="flex-1 min-w-0 p-0 pb-28 ">
+        <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 bar-fume mb-6">
           <div className="flex items-center gap-4">
             <MenuButton onClick={() => setIsSidebarOpen(true)} />
             <h2 className="font-headline text-2xl italic">Logs de <span className="text-secondary">Sistema</span></h2>
@@ -47,7 +47,7 @@ export default function AdminLogs() {
           </button>
         </header>
 
-        <div className="px-5 md:px-10">
+        <div className="px-5 md:px-10 pt-24">
           {/* Painel de Controle de Dados */}
           <div className="mb-10">
             <SettingsData onActionComplete={fetchLogs} />

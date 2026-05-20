@@ -119,6 +119,13 @@ body {
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+@media (max-width: 767px) {
+  header.bar-fume {
+    border-bottom-left-radius: 24px;
+    border-bottom-right-radius: 24px;
+  }
+}
+
 .theme-navy .bar-fume {
   background: rgba(6, 13, 26, 0.9);
 }

@@ -9,12 +9,12 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [isNavyTheme, setIsNavyTheme] = useState(() => {
-    const saved = localStorage.getItem('vallechic-theme');
+    const saved = localStorage.getItem('Valle Chic-theme');
     return saved === 'navy';
   });
 
   useEffect(() => {
-    localStorage.setItem('vallechic-theme', isNavyTheme ? 'navy' : 'brown');
+    localStorage.setItem('Valle Chic-theme', isNavyTheme ? 'navy' : 'brown');
     
     // Update body class for global styling if needed
     if (isNavyTheme) {
@@ -42,3 +42,4 @@ export function useTheme() {
   }
   return context;
 }
+

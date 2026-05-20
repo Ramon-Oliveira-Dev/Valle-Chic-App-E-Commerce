@@ -4,6 +4,8 @@ import { useCartStore } from '../store/cartStore';
 import { supabase } from '../lib/supabase';
 import BottomNavigation from '../components/BottomNavigation';
 import Sidebar from '../components/Sidebar';
+import ProductImage from '../components/ProductImage';
+import { productToCartItem } from '../lib/productMetadata';
 
 export default function Menu() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -40,7 +42,7 @@ export default function Menu() {
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
       
       {/* TopAppBar */}
-      <header className="sticky top-0 w-full z-50 flex items-center justify-between px-6 py-4 bar-fume">
+      <header className="fixed top-0 left-0 right-0  z-50 flex items-center justify-between px-6 py-4 bar-fume">
         <button 
           onClick={() => setIsSidebarOpen(true)}
           className="w-10 h-10 rounded-full border border-secondary/20 overflow-hidden flex items-center justify-center bg-primary active:scale-90 transition-transform"
@@ -63,7 +65,7 @@ export default function Menu() {
         </Link>
       </header>
 
-      <main className="pb-32 editorial-gradient min-h-screen max-w-5xl mx-auto px-6 pt-8">
+      <main className="pb-32 editorial-gradient min-h-screen max-w-5xl mx-auto px-6 pt-24">
         <div className="mb-10">
           <h2 className="font-headline text-4xl text-surface mb-2">Kits Disponíveis</h2>
           <p className="text-surface/60 text-sm">Explore nossas combinações exclusivas preparadas para você.</p>
@@ -82,42 +84,69 @@ export default function Menu() {
           <div className="grid grid-cols-1 gap-8">
             {kits.map((kit) => (
               <div key={kit.id} className="glass-card rounded-3xl overflow-hidden group shadow-2xl">
-                <Link to={`/product/${kit.id}`} className="block relative aspect-[16/10]">
-                  <img 
+                <Link to={`/product/${kit.id}`} className="block relative aspect-16/10">
+                  <ProductImage 
                     src={kit.image_url || kit.img || 'https://images.unsplash.com/photo-1584917865442-de89df76afd3?q=80&w=1000&auto=format&fit=crop'} 
                     alt={kit.name}
-                    className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                    className="transition-opacity duration-700"
                     referrerPolicy="no-referrer"
                   />
-                  <div className="absolute inset-0 bg-gradient-to-t from-primary via-transparent to-transparent"></div>
+                  <div className="absolute inset-0 bg-linear-to-t from-primary via-transparent to-transparent"></div>
                   <div className="absolute top-4 right-4 flex flex-col gap-2 items-end">
                     <span className="bg-secondary/90 text-primary text-[10px] font-bold uppercase tracking-widest px-4 py-1.5 rounded-full shadow-lg">Premium</span>
-                    {kit.discount > 0 && (
+                    {kit.discount > 0 ? (
                       <span className="bg-red-800/90 text-white px-3 py-1 text-[10px] tracking-widest uppercase font-bold rounded-full shadow-lg">-{kit.discount}% OFF</span>
-                    )}
+                    ) : null}
                   </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      addItem(productToCartItem(
+                        kit,
+                        kit.discount > 0
+                          ? (kit.discounted_price ?? (kit.sale_price ? kit.sale_price * (1 - kit.discount / 100) : kit.sale_price))
+                          : kit.sale_price
+                      ));
+                    }}
+                    disabled={kit.stock <= 0}
+                    className={`absolute bottom-4 right-4 flex items-center justify-center w-14 h-14 rounded-full shadow-2xl transition-transform duration-200 ${kit.stock > 0 ? 'bg-secondary text-primary hover:scale-105' : 'bg-surface/10 text-surface/40 cursor-not-allowed'} border border-secondary/20`}
+                  >
+                    <span className="material-symbols-outlined text-xl">shopping_cart</span>
+                  </button>
                 </Link>
                 <div className="p-6">
                   <Link to={`/product/${kit.id}`} className="flex justify-between items-start mb-2 group/title">
                     <h3 className="font-headline text-2xl text-surface group-hover/title:text-secondary transition-colors">{kit.name}</h3>
                     <div className="text-right">
-                      <p className="text-secondary font-bold text-xl">R$ {kit.sale_price.toLocaleString('pt-BR')}</p>
-                      {kit.discount > 0 && (
-                        <p className="text-xs text-surface/40 line-through">R$ {((kit.sale_price * 100) / (100 - kit.discount)).toLocaleString('pt-BR')}</p>
-                      )}
+                      <p className="text-secondary font-bold text-xl">
+                        R$ {(kit.discount > 0
+                          ? (kit.discounted_price ?? (kit.sale_price ? kit.sale_price * (1 - kit.discount / 100) : kit.sale_price)) 
+                          : kit.sale_price)?.toLocaleString('pt-BR')}
+                      </p>
+                      {kit.discount > 0 && kit.sale_price ? (
+                        <p className="text-xs text-surface/40 line-through">R$ {kit.sale_price.toLocaleString('pt-BR')}</p>
+                      ) : null}
                     </div>
                   </Link>
                   <p className="text-surface/60 text-sm mb-6 line-clamp-2">{kit.description}</p>
                   <button 
-                    onClick={() => addItem({
-                      id: kit.id,
-                      name: kit.name,
-                      price: kit.sale_price,
-                      image: kit.image_url || kit.img || ''
-                    })}
-                    className="w-full py-4 bg-secondary text-primary font-bold uppercase tracking-[0.2em] text-xs rounded-xl hover:bg-secondary/90 transition-all active:scale-[0.98] shadow-lg shadow-secondary/20"
+                    onClick={() => addItem(productToCartItem(
+                      kit,
+                      kit.discount > 0
+                        ? (kit.discounted_price ?? (kit.sale_price ? kit.sale_price * (1 - kit.discount / 100) : kit.sale_price))
+                        : kit.sale_price
+                    ))}
+                    disabled={kit.stock <= 0}
+                    className={`w-full inline-flex items-center justify-center gap-2 px-6 py-4 rounded-full text-sm font-bold uppercase tracking-[0.2em] transition-all duration-200 ${
+                      kit.stock > 0
+                        ? 'bg-secondary text-primary hover:bg-secondary/90 active:scale-95 shadow-2xl shadow-secondary/20'
+                        : 'bg-surface/10 text-surface/40 cursor-not-allowed'
+                    }`}
                   >
-                    Adicionar à Sacola
+                    <span className="material-symbols-outlined">shopping_cart</span>
+                    {kit.stock > 0 ? 'Adicionar à Sacola' : 'Esgotado'}
                   </button>
                 </div>
               </div>

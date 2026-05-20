@@ -34,19 +34,18 @@ describe('api service', () => {
 
   describe('sales', () => {
     it('should calculate accounts receivable correctly', async () => {
-      const mockInstallments = [
-        { amount: 200 },
-        { amount: 200 },
+      const mockSales = [
+        { total_amount: 1000, amount_paid: 800 },
+        { total_amount: 500, amount_paid: 500 },
+        { total_amount: 200, amount_paid: 0 },
       ];
 
       (supabase.from as any).mockReturnValue({
-        select: vi.fn().mockReturnValue({
-          eq: vi.fn().mockResolvedValue({ data: mockInstallments, error: null })
-        })
+        select: vi.fn().mockResolvedValue({ data: mockSales, error: null }),
       });
 
       const toReceive = await api.sales.getAccountsReceivable();
-      expect(toReceive).toBe(400);
+      expect(toReceive).toBe(400); // (1000-800) + (500-500) + (200-0) = 200 + 0 + 200 = 400
     });
   });
 });

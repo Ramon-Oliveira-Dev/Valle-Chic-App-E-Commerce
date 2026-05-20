@@ -4,7 +4,7 @@ import Sidebar from '../../components/Sidebar';
 import BottomNavigation from '../../components/BottomNavigation';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '../../lib/supabase';
-import NotificationBell from '../../components/NotificationBell';
+import NotificationSino from '../../components/NotificationSino';
 import MenuButton from '../../components/MenuButton';
 import { toast } from 'sonner';
 import { maskCurrency, parseCurrency } from '../../lib/utils';
@@ -12,6 +12,86 @@ import NotificationModal from '../../components/NotificationModal';
 import PDFPreviewModal from '../../components/PDFPreviewModal';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+
+const FinancialCard = ({ 
+  title, 
+  value, 
+  percentOf, 
+  updatedAt, 
+  actionText, 
+  icon, 
+  colorTheme, 
+  onClick 
+}: {
+  title: string;
+  value: number;
+  percentOf: number;
+  updatedAt: string;
+  actionText: string;
+  icon: string;
+  colorTheme: 'teal' | 'blue';
+  onClick: () => void;
+}) => {
+  const isTeal = colorTheme === 'teal';
+  const colorClass = isTeal ? 'text-[#25A2A9]' : 'text-[#335EDD]';
+  const borderClass = isTeal ? 'border-[#25A2A9]/30' : 'border-[#335EDD]/30';
+  const bgGlowClass = isTeal ? 'bg-[#25A2A9]/5' : 'bg-[#335EDD]/5';
+  const iconBgClass = isTeal ? 'bg-[#25A2A9]/10' : 'bg-[#335EDD]/10';
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      whileTap={{ scale: 0.98 }}
+      onClick={onClick}
+      className={`bg-[#0B111D]/90 backdrop-blur-xl p-6 rounded-[24px] border ${borderClass} shadow-lg relative overflow-hidden cursor-pointer group`}
+    >
+      {/* Inner Glow */}
+      <div className={`absolute top-0 left-0 w-full h-full ${bgGlowClass} opacity-100 blur-2xl pointer-events-none`}></div>
+      
+      <div className="flex flex-col relative z-10">
+        <div className="flex items-center gap-3 mb-4">
+          <div className={`w-10 h-10 rounded-full ${iconBgClass} flex items-center justify-center`}>
+            <span className={`material-symbols-outlined ${colorClass} text-[20px] font-light`}>{icon}</span>
+          </div>
+          <h3 className={`${colorClass} text-[15px] font-sans font-medium`}>{title}</h3>
+        </div>
+        
+        <div className="mb-1 flex items-baseline gap-1.5">
+          <span className="text-2xl font-sans font-light text-surface/70">R$</span>
+          <span className="text-[42px] font-sans font-bold text-surface tracking-tight leading-none">
+            {value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+          </span>
+        </div>
+        
+        <p className="text-[13px] font-sans font-normal text-surface/70 mb-4">
+          Distribuído: {percentOf}% do Lucro Real
+        </p>
+        
+        <div className="w-full h-px bg-surface/10 mb-4"></div>
+        
+        <div className="flex items-center justify-between">
+          <span className="text-surface/50 text-[12px] font-sans">{updatedAt}</span>
+          <div className={`flex items-center gap-1 ${colorClass} text-[13px] font-sans font-bold uppercase tracking-wider group-hover:translate-x-1 transition-transform`}>
+            <span>{actionText}</span>
+            <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+};
+
+const getTimeAgo = (date: Date | null) => {
+  if (!date) return 'Atualizando...';
+  const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
+  if (seconds < 60) return 'Atualizado agora';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `Atualizado há ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `Atualizado há ${hours} h`;
+  return `Atualizado em ${date.toLocaleDateString('pt-BR')}`;
+};
 
 export default function AdminFinances() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -23,31 +103,36 @@ export default function AdminFinances() {
     invested: 0,
     profit: 0,
     workingCapital: 0,
-    estimatedRevenue: 0,
-    targetWorkingCapital: 0,
     workingCapitalPercentage: 30,
-    profitPercentage: 20
+    profitPercentage: 70
   });
   const [isGoalsModalOpen, setIsGoalsModalOpen] = useState(false);
   const [newGoals, setNewGoals] = useState({
-    estimatedRevenue: '',
-    targetWorkingCapital: '',
     workingCapitalPercentage: 30,
-    profitPercentage: 20
+    profitPercentage: 70
   });
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTick(t => t + 1);
+    }, 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     fetchFinanceData();
 
     const channel = supabase
-      .channel('business_settings_changes')
+      .channel('configuracoes_metas_changes')
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
-          table: 'business_settings'
+          table: 'configuracoes_metas'
         },
         () => {
           fetchFinanceData();
@@ -114,9 +199,9 @@ export default function AdminFinances() {
       doc.text('METAS E OBJETIVOS', 14, 140);
       
       const goalsData = [
-        ['Meta de Faturamento', `R$ ${stats.estimatedRevenue.toLocaleString('pt-BR')}`, `${stats.estimatedRevenue > 0 ? ((stats.revenue / stats.estimatedRevenue) * 100).toFixed(1) : 0}%`],
-        ['Meta de Lucro (' + stats.profitPercentage + '%)', `R$ ${(stats.estimatedRevenue * (stats.profitPercentage / 100)).toLocaleString('pt-BR')}`, `${stats.estimatedRevenue > 0 ? ((stats.profit / (stats.estimatedRevenue * (stats.profitPercentage / 100))) * 100).toFixed(1) : 0}%`],
-        ['Meta de Capital de Giro (' + stats.workingCapitalPercentage + '%)', `R$ ${stats.targetWorkingCapital.toLocaleString('pt-BR')}`, `${stats.targetWorkingCapital > 0 ? (((stats.workingCapital * (stats.workingCapitalPercentage / 100)) / stats.targetWorkingCapital) * 100).toFixed(1) : 0}%`]
+        ['Lucro Realizado', `R$ ${stats.profit.toLocaleString('pt-BR')}`, '100%'],
+        ['Lucro Disponível (' + stats.profitPercentage + '%)', `R$ ${(stats.profit * (stats.profitPercentage / 100)).toLocaleString('pt-BR')}`, '-'],
+        ['Capital de Giro (' + stats.workingCapitalPercentage + '%)', `R$ ${(stats.profit * (stats.workingCapitalPercentage / 100)).toLocaleString('pt-BR')}`, '-']
       ];
       
       autoTable(doc, {
@@ -158,7 +243,7 @@ export default function AdminFinances() {
         );
       }
       
-      doc.save(`financeiro-vallechic-${selectedMonth.replace(' ', '-')}.pdf`);
+      doc.save(`financeiro-Valle Chic-${selectedMonth.replace(' ', '-')}.pdf`);
       toast.success('Relatório financeiro gerado com sucesso!');
     } catch (error) {
       console.error('Error generating PDF:', error);
@@ -170,10 +255,13 @@ export default function AdminFinances() {
     try {
       setLoading(true);
       
+      const { data: { user } } = await supabase.auth.getUser();
+      
       // Parallel data fetching for better performance
       const now = new Date();
       const currentMonth = now.getMonth() + 1;
       const currentYear = now.getFullYear();
+      const mesAno = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
 
       const [
         { data: settings },
@@ -182,21 +270,21 @@ export default function AdminFinances() {
         { data: saleItems },
         { data: paidInstallments }
       ] = await Promise.all([
-        supabase.from('business_settings').select('*').limit(1).maybeSingle(),
+        user ? supabase.from('configuracoes_metas')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('mes_ano', mesAno)
+          .maybeSingle() : Promise.resolve({ data: null }),
         supabase.from('products').select('stock, cost_price'),
         supabase.from('sales').select('*'),
         supabase.from('sale_items').select('quantity, created_at, products (cost_price)'),
         supabase.from('installments').select('amount, paid_at').eq('status', 'pago')
       ]);
       
-      const estimatedRevenue = settings?.estimated_revenue || 0;
-      const targetWorkingCapital = settings?.target_working_capital || 0;
-      const workingCapitalPercentage = settings?.working_capital_percentage || 30;
-      const profitPercentage = settings?.profit_percentage || 20;
+      const workingCapitalPercentage = settings?.percentual_capital_giro || 30;
+      const profitPercentage = settings?.percentual_lucro || 70;
       
       setNewGoals({ 
-        estimatedRevenue: maskCurrency((estimatedRevenue * 100).toFixed(0)), 
-        targetWorkingCapital: maskCurrency((targetWorkingCapital * 100).toFixed(0)),
         workingCapitalPercentage,
         profitPercentage
       });
@@ -212,8 +300,7 @@ export default function AdminFinances() {
       const revenue = monthlySales.reduce((acc, curr) => acc + (curr.total_amount || 0), 0);
       
       // Working Capital is the total cash actually received (Sales down payments + Paid installments)
-      // For the progress card, we might want the total received this month or overall.
-      // Usually, "Capital de Giro" is the total available cash.
+      // Usually, "Capital de Giro" is the total available cash overall.
       const salesAmountPaid = sales?.reduce((acc, curr) => acc + (curr.amount_paid || 0), 0) || 0;
       const installmentsTotal = paidInstallments?.reduce((acc, curr) => acc + (curr.amount || 0), 0) || 0;
       const workingCapital = salesAmountPaid + installmentsTotal;
@@ -228,6 +315,9 @@ export default function AdminFinances() {
         return acc + (curr.quantity * cost);
       }, 0);
 
+      // Profit should be calculated based on the items sold this month
+      // Revenue is the total amount of sales this month
+      // COGS is the cost of goods sold this month
       const profit = revenue - cogs;
       const itemsSold = monthlySaleItems.reduce((acc, curr) => acc + (curr.quantity || 0), 0);
 
@@ -237,11 +327,10 @@ export default function AdminFinances() {
         invested,
         profit,
         workingCapital,
-        estimatedRevenue,
-        targetWorkingCapital,
         workingCapitalPercentage,
         profitPercentage
       });
+      setLastUpdated(new Date());
 
     } catch (error) {
       console.error('Error fetching finance data:', error);
@@ -253,42 +342,35 @@ export default function AdminFinances() {
   const handleSaveGoals = async () => {
     try {
       setLoading(true);
-      // Fetch the first row to get the ID if it exists
-      const { data: existing, error: fetchError } = await supabase
-        .from('business_settings')
-        .select('id')
-        .limit(1)
-        .maybeSingle();
+      
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Usuário não autenticado');
 
-      if (fetchError) {
-        console.warn('Error fetching settings:', fetchError);
-      }
+      const now = new Date();
+      const currentMonth = now.getMonth() + 1;
+      const currentYear = now.getFullYear();
+      const mesAno = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
 
-      const payload: any = {
-        estimated_revenue: parseCurrency(newGoals.estimatedRevenue),
-        target_working_capital: parseCurrency(newGoals.targetWorkingCapital),
-        working_capital_percentage: newGoals.workingCapitalPercentage,
-        profit_percentage: newGoals.profitPercentage,
+      const capitalGiroDesejado = stats.profit * (newGoals.workingCapitalPercentage / 100);
+      const faturamentoEstimado = stats.revenue;
+
+      const payload = {
+        user_id: user.id,
+        mes_ano: mesAno,
+        faturamento_estimado: faturamentoEstimado,
+        capital_giro_desejado: capitalGiroDesejado,
+        percentual_capital_giro: newGoals.workingCapitalPercentage,
+        percentual_lucro: newGoals.profitPercentage,
         updated_at: new Date().toISOString()
       };
 
-      let error;
-      if (existing?.id) {
-        const { error: updateError } = await supabase
-          .from('business_settings')
-          .update(payload)
-          .eq('id', existing.id);
-        error = updateError;
-      } else {
-        const { error: insertError } = await supabase
-          .from('business_settings')
-          .insert([payload]);
-        error = insertError;
-      }
+      const { error } = await supabase
+        .from('configuracoes_metas')
+        .upsert(payload, { onConflict: 'user_id,mes_ano' });
 
       if (error) {
-        if (error.code === '42703') {
-          throw new Error('As colunas de percentual ainda não existem no banco de dados. Por favor, execute a migração SQL.');
+        if (error.code === '42P01') {
+          throw new Error('A tabela configuracoes_metas não existe. Por favor, crie-a no Supabase.');
         }
         throw error;
       }
@@ -308,8 +390,8 @@ export default function AdminFinances() {
     <div className="min-h-screen global-bg text-surface font-body flex flex-col">
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
-      <main className="flex-1 min-w-0 p-0 pb-32 overflow-y-auto">
-        <header className="sticky top-0 z-50 flex items-center justify-between px-6 py-4 bar-fume mb-6">
+      <main className="flex-1 min-w-0 p-0 pb-32 ">
+        <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 bar-fume mb-6">
           <div className="flex items-center gap-4">
             <MenuButton onClick={() => setIsSidebarOpen(true)} />
             <div>
@@ -324,46 +406,49 @@ export default function AdminFinances() {
             >
               <span className="material-symbols-outlined">picture_as_pdf</span>
             </button>
-            <NotificationBell />
+            <NotificationSino />
           </div>
         </header>
 
-        <div className="px-4 md:px-8">
-          <div className="mb-6 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-            <div>
-              <h2 className="font-headline text-xl italic">Finanças <span className="text-secondary">VC</span></h2>
-              <p className="text-surface/60 text-[11px] uppercase tracking-widest font-medium mt-1">Performance • {selectedMonth}</p>
-            </div>
-            
-            <div className="flex flex-wrap items-center gap-3 bg-primary/40 p-1.5 rounded-2xl border border-secondary/10">
-              <button 
-                onClick={() => setIsGoalsModalOpen(true)}
-                className="px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest text-secondary hover:bg-secondary/10 transition-all flex items-center gap-2"
-              >
-                <span className="material-symbols-outlined text-sm">settings</span>
-                Metas
-              </button>
-              <div className="w-px h-4 bg-secondary/10 self-center"></div>
-              <Link 
-                to="/admin/debts"
-                className="px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest text-secondary hover:bg-secondary/10 transition-all flex items-center gap-2"
-              >
-                <span className="material-symbols-outlined text-sm">payments</span>
-                Dívidas
-              </Link>
-              <div className="w-px h-4 bg-secondary/10 self-center"></div>
-              <div className="relative">
+        <div className="px-4 md:px-6 pt-24">
+          <div className="mb-8 flex flex-col gap-4">
+            <div className="flex justify-between items-start">
+              <div>
+                <h2 className="font-headline text-xl italic text-secondary">Finanças VC</h2>
+                <p className="text-surface/60 text-[11px] uppercase tracking-widest font-medium mt-1">Performance</p>
+              </div>
+              
+              {/* Date Selector */}
+              <div className="relative flex items-center mt-1">
                 <select 
                   value={selectedMonth}
                   onChange={(e) => setSelectedMonth(e.target.value)}
-                  className="bg-transparent text-secondary pl-2 pr-8 py-2 rounded-xl font-bold uppercase tracking-widest text-[10px] appearance-none cursor-pointer focus:outline-none"
+                  className="bg-transparent text-surface/60 pr-5 font-sans font-medium text-[12px] appearance-none cursor-pointer focus:outline-none"
                 >
                   <option value="Janeiro 2026">Janeiro 2026</option>
                   <option value="Fevereiro 2026">Fevereiro 2026</option>
                   <option value="Março 2026">Março 2026</option>
                 </select>
-                <span className="material-symbols-outlined absolute right-2 top-1/2 -translate-y-1/2 text-secondary text-xs pointer-events-none">expand_more</span>
+                <span className="material-symbols-outlined absolute right-0 top-1/2 -translate-y-1/2 text-surface/40 text-[14px] font-light pointer-events-none">expand_more</span>
               </div>
+            </div>
+            
+            {/* Action Pills */}
+            <div className="flex items-center gap-3">
+              <button 
+                onClick={() => setIsGoalsModalOpen(true)}
+                className="px-4 py-1.5 rounded-full bg-secondary/5 border border-secondary/30 backdrop-blur-md text-[11px] font-sans font-medium text-secondary hover:bg-secondary/10 transition-all flex items-center gap-1.5 shadow-sm"
+              >
+                <span className="material-symbols-outlined text-[14px] font-light">settings</span>
+                Metas
+              </button>
+              <Link 
+                to="/admin/debts"
+                className="px-4 py-1.5 rounded-full bg-blue-400/5 border border-blue-400/30 backdrop-blur-md text-[11px] font-sans font-medium text-blue-400 hover:bg-blue-400/10 transition-all flex items-center gap-1.5 shadow-sm"
+              >
+                <span className="material-symbols-outlined text-[14px] font-light">account_balance_wallet</span>
+                Dívidas
+              </Link>
             </div>
           </div>
 
@@ -373,87 +458,36 @@ export default function AdminFinances() {
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                {/* Profit Distribution Progress */}
-                <motion.div 
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="glass-card p-6 rounded-2xl border border-secondary/20 shadow-lg"
-                >
-                  <div className="flex flex-col mb-6">
-                    <div className="flex justify-between items-start mb-2">
-                      <div>
-                        <h3 className="text-secondary text-sm font-bold uppercase tracking-widest mb-1">Distribuição de Lucro</h3>
-                        <p className="text-surface/60 text-xs">Lucro Realizado ({stats.profitPercentage}%) vs. Meta Mensal</p>
-                      </div>
-                      <div className="flex items-center gap-1 bg-secondary/10 px-2 py-1 rounded-lg">
-                        <span className="text-xs font-bold text-secondary">
-                          {stats.estimatedRevenue > 0 ? (((stats.workingCapital * (stats.profitPercentage / 100)) / (stats.estimatedRevenue * (stats.profitPercentage / 100))) * 100).toFixed(1) : 0}%
-                        </span>
-                      </div>
-                    </div>
-                    <div className="mt-2">
-                      <span className="text-3xl font-bold text-surface">
-                        R$ {(stats.workingCapital * (stats.profitPercentage / 100)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </span>
-                      <span className="text-surface/40 text-sm ml-2">/ R$ {(stats.estimatedRevenue * (stats.profitPercentage / 100)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                    </div>
-                  </div>
+              <div className="mb-4 flex items-center px-1">
+                <p className="text-surface/60 text-[11px] uppercase tracking-widest font-bold font-sans">
+                  BASE DE CÁLCULO: <span className="text-secondary">LUCRO REAL (R$ {stats.profit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})</span>
+                </p>
+              </div>
 
-                  <div className="space-y-2">
-                    <div className="w-full h-4 bg-surface/10 rounded-full overflow-hidden border border-white/5">
-                      <motion.div 
-                        initial={{ width: 0 }}
-                        animate={{ width: `${Math.min(((stats.workingCapital * (stats.profitPercentage / 100)) / ((stats.estimatedRevenue * (stats.profitPercentage / 100)) || 1)) * 100, 100)}%` }}
-                        transition={{ duration: 1.5, ease: "circOut" }}
-                        className={`h-full relative ${(((stats.workingCapital * (stats.profitPercentage / 100)) / ((stats.estimatedRevenue * (stats.profitPercentage / 100)) || 1)) * 100) > 0 ? 'bg-gradient-to-r from-[#FFD700]/60 to-[#FFD700]' : 'bg-transparent'}`}
-                      >
-                        <div className="absolute inset-0 bg-[linear-gradient(45deg,rgba(255,255,255,0.2)_25%,transparent_25%,transparent_50%,rgba(255,255,255,0.2)_50%,rgba(255,255,255,0.2)_75%,transparent_75%,transparent)] bg-[length:30px_30px] animate-[shimmer_2s_linear_infinite]"></div>
-                      </motion.div>
-                    </div>
-                  </div>
-                </motion.div>
+              <div className="grid grid-cols-1 gap-4 mb-8">
+                {/* Profit Distribution */}
+                <FinancialCard 
+                  title="Lucro Disponível"
+                  value={stats.profit * (stats.profitPercentage / 100)}
+                  percentOf={stats.profitPercentage}
+                  updatedAt={getTimeAgo(lastUpdated)}
+                  actionText="VER DETALHES"
+                  icon="payments"
+                  colorTheme="teal"
+                  onClick={() => setIsGoalsModalOpen(true)}
+                />
 
-                {/* Working Capital Progress */}
-                <motion.div 
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.1 }}
-                  className="glass-card p-6 rounded-2xl border border-secondary/20 shadow-lg"
-                >
-                  <div className="flex flex-col mb-6">
-                    <div className="flex justify-between items-start mb-2">
-                      <div>
-                        <h3 className="text-blue-400 text-sm font-bold uppercase tracking-widest mb-1">Capital de Giro</h3>
-                        <p className="text-surface/60 text-xs">Saldo em Caixa ({stats.workingCapitalPercentage}%) vs. Meta de Capital</p>
-                      </div>
-                      <div className="flex items-center gap-1 bg-blue-400/10 px-2 py-1 rounded-lg">
-                        <span className="text-xs font-bold text-blue-400">
-                          {stats.targetWorkingCapital > 0 ? (((stats.workingCapital * (stats.workingCapitalPercentage / 100)) / stats.targetWorkingCapital) * 100).toFixed(1) : 0}%
-                        </span>
-                      </div>
-                    </div>
-                    <div className="mt-2">
-                      <span className="text-3xl font-bold text-surface">
-                        R$ {(stats.workingCapital * (stats.workingCapitalPercentage / 100)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </span>
-                      <span className="text-surface/40 text-sm ml-2">/ R$ {stats.targetWorkingCapital.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="w-full h-4 bg-surface/10 rounded-full overflow-hidden border border-white/5">
-                      <motion.div 
-                        initial={{ width: 0 }}
-                        animate={{ width: `${Math.min(((stats.workingCapital * (stats.workingCapitalPercentage / 100)) / (stats.targetWorkingCapital || 1)) * 100, 100)}%` }}
-                        transition={{ duration: 1.5, ease: "circOut" }}
-                        className={`h-full relative ${(((stats.workingCapital * (stats.workingCapitalPercentage / 100)) / (stats.targetWorkingCapital || 1)) * 100) > 0 ? 'bg-gradient-to-r from-blue-400/60 to-blue-400' : 'bg-transparent'}`}
-                      >
-                        <div className="absolute inset-0 bg-[linear-gradient(45deg,rgba(255,255,255,0.2)_25%,transparent_25%,transparent_50%,rgba(255,255,255,0.2)_50%,rgba(255,255,255,0.2)_75%,transparent_75%,transparent)] bg-[length:30px_30px] animate-[shimmer_2s_linear_infinite]"></div>
-                      </motion.div>
-                    </div>
-                  </div>
-                </motion.div>
+                {/* Working Capital */}
+                <FinancialCard 
+                  title="Capital de Giro"
+                  value={stats.profit * (stats.workingCapitalPercentage / 100)}
+                  percentOf={stats.workingCapitalPercentage}
+                  updatedAt={getTimeAgo(lastUpdated)}
+                  actionText="GERENCIAR"
+                  icon="account_balance"
+                  colorTheme="blue"
+                  onClick={() => setIsGoalsModalOpen(true)}
+                />
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
@@ -545,36 +579,50 @@ export default function AdminFinances() {
                       initial={{ opacity: 0, scale: 0.9 }}
                       animate={{ opacity: 1, scale: 1 }}
                       exit={{ opacity: 0, scale: 0.9 }}
-                      className="glass-card w-full max-w-md p-8 rounded-3xl border border-secondary/20 shadow-2xl"
+                      className="glass-card w-full max-w-md p-8 rounded-t-[24px] rounded-b-3xl border border-secondary/20 shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar"
                     >
-                      <h3 className="font-headline text-2xl italic mb-6">Configurar Metas</h3>
+                      <h3 className="font-headline text-2xl italic mb-6 text-secondary uppercase tracking-wider text-center">Metas Financeiras</h3>
+                      
+                      {/* Cabeçalho Dinâmico */}
+                      <div className="bg-secondary/10 border border-secondary/20 rounded-xl p-4 mb-6 flex items-center justify-between">
+                        <div>
+                          <p className="text-[10px] uppercase tracking-widest text-secondary font-bold mb-1">Lucro Líquido Real (Mês Atual)</p>
+                          <p className="text-2xl font-headline text-surface">R$ {stats.profit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                        </div>
+                        <div className="w-10 h-10 rounded-full bg-secondary/20 flex items-center justify-center text-secondary">
+                          <span className="material-symbols-outlined">payments</span>
+                        </div>
+                      </div>
                       
                       <div className="space-y-6">
                         {/* Monetary Values Section */}
                         <div className="space-y-4">
                           <h4 className="text-secondary text-sm font-bold uppercase tracking-widest border-b border-secondary/20 pb-2">Valores Monetários</h4>
-                          <div className="space-y-2">
-                            <label className="text-[10px] uppercase tracking-widest text-surface/60">Faturamento Estimado (Mês)</label>
-                            <input 
-                              type="text" 
-                              inputMode="numeric"
-                              value={newGoals.estimatedRevenue}
-                              onChange={(e) => setNewGoals({ ...newGoals, estimatedRevenue: maskCurrency(e.target.value) })}
-                              className="w-full bg-primary/40 border border-secondary/20 rounded-xl py-3 px-4 text-surface font-bold text-lg focus:outline-none focus:border-secondary transition-colors"
-                              placeholder="R$ 0,00"
-                            />
-                          </div>
                           
                           <div className="space-y-2">
-                            <label className="text-[10px] uppercase tracking-widest text-surface/60">Capital de Giro Desejado</label>
-                            <input 
-                              type="text" 
-                              inputMode="numeric"
-                              value={newGoals.targetWorkingCapital}
-                              onChange={(e) => setNewGoals({ ...newGoals, targetWorkingCapital: maskCurrency(e.target.value) })}
-                              className="w-full bg-primary/40 border border-secondary/20 rounded-xl py-3 px-4 text-surface font-bold text-lg focus:outline-none focus:border-secondary transition-colors"
-                              placeholder="R$ 0,00"
-                            />
+                            <div className="flex items-center justify-between">
+                              <label className="text-[10px] uppercase tracking-widest text-surface/60">Capital de Giro Desejado</label>
+                              <span className="text-[8px] uppercase tracking-widest text-secondary font-bold">Calculado Automaticamente</span>
+                            </div>
+                            <div className="w-full bg-surface/10 border border-surface/20 rounded-xl py-3 px-4 flex items-center justify-between opacity-80 cursor-not-allowed">
+                              <span className="text-surface font-bold text-lg">
+                                R$ {(stats.profit * (newGoals.workingCapitalPercentage / 100)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              </span>
+                              <span className="material-symbols-outlined text-secondary/60 text-xl">lock</span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <label className="text-[10px] uppercase tracking-widest text-surface/60">Meta de Lucro (Mês)</label>
+                              <span className="text-[8px] uppercase tracking-widest text-secondary font-bold">Calculado Automaticamente</span>
+                            </div>
+                            <div className="w-full bg-surface/10 border border-surface/20 rounded-xl py-3 px-4 flex items-center justify-between opacity-80 cursor-not-allowed">
+                              <span className="text-surface font-bold text-lg">
+                                R$ {(stats.profit * (newGoals.profitPercentage / 100)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              </span>
+                              <span className="material-symbols-outlined text-secondary/60 text-xl">lock</span>
+                            </div>
                           </div>
                         </div>
 
@@ -595,16 +643,17 @@ export default function AdminFinances() {
                                 value={newGoals.workingCapitalPercentage}
                                 onChange={(e) => {
                                   const val = parseInt(e.target.value) || 0;
-                                  const revenue = parseCurrency(newGoals.estimatedRevenue);
-                                  const targetVal = (revenue * (val / 100)).toFixed(0);
                                   setNewGoals({ 
                                     ...newGoals, 
                                     workingCapitalPercentage: val,
-                                    targetWorkingCapital: maskCurrency(targetVal)
+                                    profitPercentage: 100 - val
                                   });
                                 }}
                                 className="w-full accent-secondary h-2 bg-primary/40 rounded-lg appearance-none cursor-pointer"
                               />
+                              <p className="text-[10px] text-surface/40">
+                                Isso representa <span className="text-secondary font-bold">R$ {(stats.profit * (newGoals.workingCapitalPercentage / 100)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span> de capital de giro
+                              </p>
                             </div>
                             <div className="space-y-3">
                               <div className="flex flex-col">
@@ -617,9 +666,19 @@ export default function AdminFinances() {
                                 max="100"
                                 step="1"
                                 value={newGoals.profitPercentage}
-                                onChange={(e) => setNewGoals({ ...newGoals, profitPercentage: parseInt(e.target.value) || 0 })}
+                                onChange={(e) => {
+                                  const val = parseInt(e.target.value) || 0;
+                                  setNewGoals({ 
+                                    ...newGoals, 
+                                    profitPercentage: val,
+                                    workingCapitalPercentage: 100 - val
+                                  });
+                                }}
                                 className="w-full accent-secondary h-2 bg-primary/40 rounded-lg appearance-none cursor-pointer"
                               />
+                              <p className="text-[10px] text-surface/40">
+                                Isso representa <span className="text-secondary font-bold">R$ {(stats.profit * (newGoals.profitPercentage / 100)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span> de lucro estimado
+                              </p>
                             </div>
                           </div>
                         </div>
@@ -633,16 +692,28 @@ export default function AdminFinances() {
                         <div className="flex gap-4 pt-6">
                           <button 
                             onClick={() => setIsGoalsModalOpen(false)}
-                            className="flex-1 py-3 rounded-xl border border-transparent text-surface/60 font-bold uppercase tracking-widest text-[10px] hover:bg-white/5 hover:text-surface transition-all"
+                            disabled={loading}
+                            className="flex-1 py-3 rounded-xl border border-secondary/30 bg-gradient-to-b from-black to-surface/5 text-secondary font-bold uppercase tracking-widest text-[10px] hover:bg-secondary/10 transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]"
                           >
+                            <span className="material-symbols-outlined text-[16px]">close</span>
                             Cancelar
                           </button>
                           <button 
                             onClick={handleSaveGoals}
-                            disabled={newGoals.workingCapitalPercentage + newGoals.profitPercentage > 100}
-                            className={`flex-1 py-3 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-all shadow-lg ${newGoals.workingCapitalPercentage + newGoals.profitPercentage > 100 ? 'bg-surface/10 text-surface/20 cursor-not-allowed shadow-none' : 'bg-secondary text-primary hover:bg-secondary/90 shadow-secondary/20 hover:shadow-secondary/40 hover:-translate-y-0.5'}`}
+                            disabled={newGoals.workingCapitalPercentage + newGoals.profitPercentage > 100 || loading}
+                            className={`flex-1 py-3 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-all shadow-lg flex items-center justify-center gap-2 ${newGoals.workingCapitalPercentage + newGoals.profitPercentage > 100 || loading ? 'bg-surface/10 text-surface/20 cursor-not-allowed shadow-none' : 'bg-gradient-to-b from-secondary to-[#997a26] text-primary hover:from-[#e6c258] hover:to-[#806620] shadow-secondary/20 hover:shadow-secondary/40 hover:-translate-y-0.5 border border-[#ffdf70]/50'}`}
                           >
-                            Salvar Metas
+                            {loading ? (
+                              <>
+                                <div className="w-4 h-4 border-2 border-surface/20 border-t-surface/60 rounded-full animate-spin"></div>
+                                Salvando...
+                              </>
+                            ) : (
+                              <>
+                                <span className="material-symbols-outlined text-[16px]">save</span>
+                                Salvar Metas
+                              </>
+                            )}
                           </button>
                         </div>
                       </div>
@@ -703,18 +774,22 @@ export default function AdminFinances() {
 
           <div className="p-5 bg-slate-900 rounded-2xl text-white">
             <div className="flex justify-between items-center mb-4">
-              <p className="text-[10px] uppercase tracking-widest text-secondary font-bold">Capital de Giro</p>
-              <span className="text-xs font-bold">{stats.targetWorkingCapital > 0 ? (((stats.workingCapital * (stats.workingCapitalPercentage / 100)) / stats.targetWorkingCapital) * 100).toFixed(1) : 0}%</span>
+              <p className="text-[10px] uppercase tracking-widest text-secondary font-bold">Distribuição do Lucro</p>
+              <span className="text-xs font-bold">R$ {stats.profit.toLocaleString('pt-BR')}</span>
             </div>
-            <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+            <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden flex">
               <div 
                 className="h-full bg-secondary" 
-                style={{ width: `${Math.min(((stats.workingCapital * (stats.workingCapitalPercentage / 100)) / (stats.targetWorkingCapital || 1)) * 100, 100)}%` }}
+                style={{ width: `${stats.workingCapitalPercentage}%` }}
+              ></div>
+              <div 
+                className="h-full bg-emerald-500" 
+                style={{ width: `${stats.profitPercentage}%` }}
               ></div>
             </div>
             <div className="flex justify-between mt-2 text-[10px] text-white/60">
-              <span>R$ {(stats.workingCapital * (stats.workingCapitalPercentage / 100)).toLocaleString('pt-BR')}</span>
-              <span>Meta: R$ {stats.targetWorkingCapital.toLocaleString('pt-BR')}</span>
+              <span>Giro: R$ {(stats.profit * (stats.workingCapitalPercentage / 100)).toLocaleString('pt-BR')}</span>
+              <span>Lucro: R$ {(stats.profit * (stats.profitPercentage / 100)).toLocaleString('pt-BR')}</span>
             </div>
           </div>
 
@@ -739,3 +814,4 @@ export default function AdminFinances() {
     </div>
   );
 }
+

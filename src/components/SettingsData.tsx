@@ -29,7 +29,7 @@ export default function SettingsData({ onActionComplete }: SettingsDataProps) {
     'sales',
     'products',
     'clients',
-    'business_settings',
+    'configuracoes_metas',
     'system_logs'
   ];
 
@@ -54,7 +54,7 @@ export default function SettingsData({ onActionComplete }: SettingsDataProps) {
       link.href = url;
       
       const date = new Date().toISOString().split('T')[0];
-      link.download = `backup_vallechic_${date}.json`;
+      link.download = `backup_Valle Chic_${date}.json`;
       
       document.body.appendChild(link);
       link.click();
@@ -279,3 +279,4 @@ export default function SettingsData({ onActionComplete }: SettingsDataProps) {
     </div>
   );
 }
+

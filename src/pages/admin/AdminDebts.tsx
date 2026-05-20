@@ -6,7 +6,7 @@ import { supabase } from '../../lib/supabase';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
 import NotificationModal from '../../components/NotificationModal';
-import NotificationBell from '../../components/NotificationBell';
+import NotificationSino from '../../components/NotificationSino';
 import MenuButton from '../../components/MenuButton';
 
 interface Installment {
@@ -75,7 +75,7 @@ export default function AdminDebts() {
     }
   };
 
-  const markAsPaid = async (id: string) => {
+  const markAsPaid = async (id: string, clientId: string) => {
     try {
       const { error } = await supabase
         .from('installments')
@@ -84,9 +84,26 @@ export default function AdminDebts() {
 
       if (error) throw error;
 
-      setInstallments(installments.map(inst => 
+      // Update local state first for immediate UI feedback
+      const updatedInstallments = installments.map(inst => 
         inst.id === id ? { ...inst, status: 'pago', paid_at: new Date().toISOString() } : inst
-      ));
+      );
+      setInstallments(updatedInstallments);
+
+      // Check if client has any remaining pending installments
+      const { data: pendingInstallments, error: pendingError } = await supabase
+        .from('installments')
+        .select('id')
+        .eq('client_id', clientId)
+        .eq('status', 'pendente');
+
+      if (!pendingError && (!pendingInstallments || pendingInstallments.length === 0)) {
+        // No more pending installments, update client status to 'Em Dia'
+        await supabase
+          .from('clients')
+          .update({ payment_status: 'Em Dia' })
+          .eq('id', clientId);
+      }
 
       setModalConfig({
         isOpen: true,
@@ -125,18 +142,18 @@ export default function AdminDebts() {
     <div className="min-h-screen global-bg text-surface font-body flex flex-col">
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
-      <main className="flex-1 min-w-0 p-0 pb-28 overflow-y-auto">
-        <header className="sticky top-0 z-50 flex items-center justify-between px-6 py-4 bar-fume mb-10">
+      <main className="flex-1 min-w-0 p-0 pb-28 ">
+        <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 bar-fume mb-10">
           <div className="flex items-center gap-4">
             <MenuButton onClick={() => setIsSidebarOpen(true)} />
             <h2 className="font-headline text-2xl italic">Controle de <span className="text-secondary">Dívidas</span></h2>
           </div>
           <div className="flex items-center gap-4">
-            <NotificationBell />
+            <NotificationSino />
           </div>
         </header>
 
-        <div className="px-5 md:px-10 max-w-6xl mx-auto">
+        <div className="px-5 md:px-10 max-w-6xl mx-auto pt-24">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10">
             <div className="glass-card p-6 rounded-2xl border border-secondary/10 relative overflow-hidden group">
               <div className="absolute -right-4 -top-4 w-16 h-16 bg-amber-400/10 rounded-full blur-2xl group-hover:bg-amber-400/20 transition-all" />
@@ -231,7 +248,7 @@ export default function AdminDebts() {
                     {inst.status === 'pendente' ? (
                       <>
                         <button 
-                          onClick={() => markAsPaid(inst.id)}
+                          onClick={() => markAsPaid(inst.id, inst.client_id)}
                           className="flex-1 bg-emerald-500/10 text-emerald-500 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-emerald-500 hover:text-primary transition-all flex items-center justify-center gap-2 border border-emerald-500/20"
                         >
                           <span className="material-symbols-outlined text-sm">check_circle</span>

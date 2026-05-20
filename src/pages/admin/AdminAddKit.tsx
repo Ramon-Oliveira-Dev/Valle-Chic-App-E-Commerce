@@ -4,7 +4,7 @@ import Sidebar from '../../components/Sidebar';
 import BottomNavigation from '../../components/BottomNavigation';
 import { supabase } from '../../lib/supabase';
 import NotificationModal from '../../components/NotificationModal';
-import NotificationBell from '../../components/NotificationBell';
+import NotificationSino from '../../components/NotificationSino';
 import MenuButton from '../../components/MenuButton';
 import { maskCurrency, parseCurrency } from '../../lib/utils';
 import imageCompression from 'browser-image-compression';
@@ -20,6 +20,7 @@ export default function AdminAddKit() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [costPrice, setCostPrice] = useState('');
   const [salePrice, setSalePrice] = useState('');
+  const [hasDiscount, setHasDiscount] = useState(false);
   const [discount, setDiscount] = useState<number | ''>('');
   const [stock, setStock] = useState<number | ''>('');
   const [sku, setSku] = useState('');
@@ -158,7 +159,7 @@ export default function AdminAddKit() {
 
       // 2. Save Kit as a Product
       const sPrice = parseCurrency(salePrice);
-      const dPercent = Number(discount) || 0;
+      const dPercent = hasDiscount ? (Number(discount) || 0) : 0;
       const dPrice = sPrice * (1 - dPercent / 100);
 
       const kitData = {
@@ -185,17 +186,6 @@ export default function AdminAddKit() {
 
       const { data: newKit, error } = await supabase.from('products').insert([kitData]).select().single();
       if (error) throw error;
-
-      // 3. Record Inventory Movement
-      if (newKit && Number(stock) > 0) {
-        await supabase.from('inventory_movements').insert([{
-          product_id: newKit.id,
-          type: 'entry',
-          quantity: Number(stock),
-          date: new Date(entryDate).toISOString(),
-          description: 'Entrada inicial (Cadastro de kit)'
-        }]);
-      }
       
       setModalConfig({
         isOpen: true,
@@ -222,8 +212,8 @@ export default function AdminAddKit() {
     <div className="min-h-screen global-bg text-surface font-body flex flex-col">
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
-      <main className="flex-1 min-w-0 p-0 pb-28 overflow-y-auto">
-        <header className="sticky top-0 z-50 flex items-center justify-between px-6 py-4 bar-fume mb-10">
+      <main className="flex-1 min-w-0 p-0 pb-28 ">
+        <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 bar-fume mb-10">
           <div className="flex items-center gap-4">
             <MenuButton onClick={() => setIsSidebarOpen(true)} />
             <div>
@@ -236,11 +226,11 @@ export default function AdminAddKit() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <NotificationBell />
+            <NotificationSino />
           </div>
         </header>
 
-        <div className="px-5 md:px-10">
+        <div className="px-5 md:px-10 pt-24">
           <div className="mb-8">
             <h2 className="font-headline text-3xl italic">Cadastrar Kit</h2>
             <p className="text-surface/60 text-sm mt-1">Crie um conjunto de produtos para venda especial.</p>
@@ -375,18 +365,42 @@ export default function AdminAddKit() {
                       placeholder="R$ 0,00" 
                     />
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Desconto (%)</label>
-                    <input 
-                      type="number" 
-                      inputMode="numeric"
-                      value={discount}
-                      onChange={(e) => setDiscount(e.target.value === '' ? '' : Number(e.target.value))}
-                      className="w-full bg-primary/40 border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary" 
-                      placeholder="0" 
-                    />
+                  <div className="md:col-span-2 space-y-4">
+                    <div className="flex items-center justify-between p-4 rounded-xl bg-primary/20 border border-secondary/10">
+                      <div className="flex flex-col">
+                        <span className="text-sm text-surface">Oferecer Desconto?</span>
+                        <p className="text-[10px] text-surface/40 italic">Ative para definir uma porcentagem de desconto</p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="sr-only peer"
+                          checked={hasDiscount}
+                          onChange={(e) => {
+                            setHasDiscount(e.target.checked);
+                            if (!e.target.checked) setDiscount('');
+                          }}
+                        />
+                        <div className="w-11 h-6 bg-primary border border-secondary/30 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-secondary after:border-secondary after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-secondary/20"></div>
+                      </label>
+                    </div>
+
+                    {hasDiscount && (
+                      <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                        <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Desconto (%)</label>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          value={discount}
+                          onChange={(e) => setDiscount(e.target.value === '' ? '' : Number(e.target.value))}
+                          className="w-full bg-primary/40 border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary"
+                          placeholder="Ex: 10"
+                        />
+                      </div>
+                    )}
                   </div>
-                  {discount && salePrice && (
+
+                  {hasDiscount && discount && salePrice && (
                     <div className="md:col-span-2 p-3 rounded-lg bg-secondary/10 border border-secondary/20">
                       <p className="text-xs text-secondary font-bold uppercase tracking-widest">
                         Preço com Desconto: R$ {(parseCurrency(salePrice) * (1 - Number(discount) / 100)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}

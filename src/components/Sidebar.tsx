@@ -162,7 +162,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                 )}
 
                 <p className="text-[8px] text-surface/20 uppercase tracking-[0.5em] font-medium text-center mt-4">
-                  © 2026 VALLECHIC
+                  © 2026 Valle Chic
                 </p>
               </div>
             </div>
@@ -172,3 +172,4 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
     </AnimatePresence>
   );
 }
+

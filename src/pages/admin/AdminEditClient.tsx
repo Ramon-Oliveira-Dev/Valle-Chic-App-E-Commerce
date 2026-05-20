@@ -5,7 +5,7 @@ import BottomNavigation from '../../components/BottomNavigation';
 import { supabase } from '../../lib/supabase';
 import { toast } from 'sonner';
 import NotificationModal from '../../components/NotificationModal';
-import NotificationBell from '../../components/NotificationBell';
+import NotificationSino from '../../components/NotificationSino';
 import MenuButton from '../../components/MenuButton';
 import imageCompression from 'browser-image-compression';
 
@@ -38,7 +38,8 @@ export default function AdminEditClient() {
     birth_month: null as number | null,
     is_vip: false,
     payment_status: 'Adimplente',
-    image_url: ''
+    image_url: '',
+    status: 'Ativo'
   });
 
   useEffect(() => {
@@ -55,28 +56,34 @@ export default function AdminEditClient() {
 
       if (error) throw error;
       if (data) {
+        // Converte a string "DD/MM" do banco para os campos numéricos da tela
+        let d = null;
+        let m = null;
+        if (data.birthday && data.birthday.includes('/')) {
+          const parts = data.birthday.split('/');
+          d = parseInt(parts[0]);
+          m = parseInt(parts[1]);
+        }
+
         setClientData({
-          name: data.name,
-          phone: data.phone,
+          name: data.name || '',
+          phone: data.phone || '',
           address: data.address || '',
-          birth_day: data.birth_day,
-          birth_month: data.birth_month,
-          is_vip: data.is_vip,
+          birth_day: d || data.birth_day || null,
+          birth_month: m || data.birth_month || null,
+          is_vip: data.is_vip || false,
           payment_status: data.payment_status || 'Adimplente',
-          image_url: data.image_url || ''
+          image_url: data.image_url || '',
+          status: data.status || 'Ativo'
         });
+        
         if (data.image_url) {
           setImagePreview(data.image_url);
         }
       }
     } catch (error) {
-      console.error('Error fetching client:', error);
-      setModalConfig({
-        isOpen: true,
-        title: 'Erro de Carregamento',
-        message: 'Não foi possível carregar os dados do cliente.',
-        type: 'error'
-      });
+      console.error('Erro ao carregar cliente:', error);
+      toast.error('Não foi possível carregar os dados do cliente.');
     } finally {
       setLoading(false);
     }
@@ -94,247 +101,157 @@ export default function AdminEditClient() {
     }
   };
 
-  const uploadImage = async (file: File) => {
-    try {
-      const options = {
-        maxSizeMB: 0.5,
-        maxWidthOrHeight: 800,
-        useWebWorker: true,
-      };
-      const compressedFile = await imageCompression(file, options);
-      const fileName = `${Date.now()}-${file.name.replace(/\s+/g, '_')}`;
-      const { data, error } = await supabase.storage
-        .from('product-images')
-        .upload(`clients/${fileName}`, compressedFile);
-
-      if (error) throw error;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('product-images')
-        .getPublicUrl(`clients/${fileName}`);
-
-      return publicUrl;
-    } catch (error) {
-      console.error('Error uploading image:', error);
-      throw error;
-    }
-  };
-
   const handleSave = async () => {
     try {
       setIsUploading(true);
-      let imageUrl = clientData.image_url;
+      
+      let finalImageUrl = clientData.image_url;
+
+      // Upload da imagem se houver uma nova selecionada
       if (imageFile) {
-        imageUrl = await uploadImage(imageFile);
+        const options = { maxSizeMB: 0.5, maxWidthOrHeight: 800, useWebWorker: true };
+        const compressed = await imageCompression(imageFile, options);
+        const fileName = `${Date.now()}-${imageFile.name}`;
+        const { error: uploadError } = await supabase.storage
+          .from('product-images')
+          .upload(`clients/${fileName}`, compressed);
+        
+        if (uploadError) throw uploadError;
+        
+        const { data: { publicUrl } } = supabase.storage
+          .from('product-images')
+          .getPublicUrl(`clients/${fileName}`);
+        
+        finalImageUrl = publicUrl;
       }
+
+      // Formata o aniversário para salvar como string DD/MM
+      const formattedBirthday = (clientData.birth_day && clientData.birth_month)
+        ? `${String(clientData.birth_day).padStart(2, '0')}/${String(clientData.birth_month).padStart(2, '0')}`
+        : null;
 
       const { error } = await supabase
         .from('clients')
         .update({
-          ...clientData,
-          image_url: imageUrl
+          name: clientData.name,
+          phone: clientData.phone,
+          address: clientData.address,
+          birthday: formattedBirthday,
+          is_vip: clientData.is_vip,
+          payment_status: clientData.payment_status,
+          image_url: finalImageUrl,
+          status: 'Ativo' // Ao salvar, o cliente deixa de ser "Pendente"
         })
         .eq('id', id);
 
       if (error) throw error;
       
-      setModalConfig({
-        isOpen: true,
-        title: 'Sucesso!',
-        message: 'Dados do cliente atualizados com sucesso.',
-        type: 'success'
-      });
-      
-      setTimeout(() => navigate('/admin/clients'), 2000);
+      toast.success('Cliente atualizado com sucesso!');
+      navigate('/admin/clients');
+
     } catch (error: any) {
-      console.error('Error updating client:', error);
-      setModalConfig({
-        isOpen: true,
-        title: 'Erro ao Atualizar',
-        message: error.message || 'Ocorreu um erro inesperado ao atualizar o cliente.',
-        type: 'error'
-      });
+      console.error('Erro ao salvar:', error);
+      toast.error(error.message || 'Erro ao atualizar cliente.');
     } finally {
       setIsUploading(false);
     }
   };
 
+  if (loading) return <div className="min-h-screen global-bg flex items-center justify-center text-secondary uppercase tracking-widest text-xs">Carregando...</div>;
+
   return (
     <div className="min-h-screen global-bg text-surface font-body flex flex-col">
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
-      <main className="flex-1 min-w-0 p-0 pb-28 overflow-y-auto">
-        <header className="sticky top-0 z-50 flex items-center justify-between px-6 py-4 bar-fume mb-10">
+      <main className="flex-1 min-w-0 p-0 pb-28">
+        <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 bar-fume border-b border-white/5">
           <div className="flex items-center gap-4">
             <MenuButton onClick={() => setIsSidebarOpen(true)} />
-            <div>
-              <div className="flex items-center gap-4">
-                <Link to="/admin/clients" className="text-surface/60 hover:text-secondary transition-colors">
-                  <span className="material-symbols-outlined">arrow_back</span>
-                </Link>
-                <h2 className="font-headline text-2xl italic">Editar Cliente <span className="text-secondary">VC</span></h2>
-              </div>
+            <div className="flex items-center gap-4">
+              <Link to="/admin/clients" className="text-surface/60 hover:text-secondary transition-colors">
+                <span className="material-symbols-outlined">arrow_back</span>
+              </Link>
+              <h2 className="font-headline text-2xl italic">Editar Cliente <span className="text-secondary italic ml-1">VC</span></h2>
             </div>
           </div>
-          <div className="flex items-center gap-4">
-            <NotificationBell />
-          </div>
+          <NotificationSino />
         </header>
 
-        <div className="px-5 md:px-10">
-          <div className="mb-8">
-            <h2 className="font-headline text-3xl italic">Editar Perfil</h2>
-            <p className="text-surface/60 text-sm mt-1">Atualize as informações do cliente ID: {id}</p>
-          </div>
-
-        <div className="max-w-xl glass-card rounded-2xl p-5 sm:p-8">
-          <form className="space-y-8" onSubmit={(e) => { e.preventDefault(); handleSave(); }}>
-            <section>
-              <h3 className="text-secondary text-sm font-bold uppercase tracking-widest mb-6 border-b border-secondary/20 pb-2">Informações do Cliente</h3>
+        <div className="px-5 md:px-10 pt-28 max-w-xl mx-auto w-full">
+          <div className="glass-card rounded-[32px] p-8 border border-white/5 shadow-2xl bg-[#0B111D]/80 backdrop-blur-3xl">
+            <form className="space-y-6" onSubmit={(e) => { e.preventDefault(); handleSave(); }}>
               
-              {/* Image Upload Section */}
-              <div className="flex flex-col items-center mb-8">
+              {/* Seção da Foto */}
+              <div className="flex flex-col items-center gap-4 mb-4">
                 <div 
                   onClick={() => fileInputRef.current?.click()}
-                  className="w-32 h-32 rounded-full border-2 border-dashed border-secondary/30 flex flex-col items-center justify-center overflow-hidden cursor-pointer hover:border-secondary/60 transition-colors bg-primary/20 relative group"
+                  className="w-28 h-28 rounded-full border-2 border-dashed border-secondary/30 flex items-center justify-center overflow-hidden cursor-pointer hover:border-secondary transition-all bg-primary/20 relative group"
                 >
                   {imagePreview ? (
-                    <>
-                      <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                        <span className="material-symbols-outlined text-white">edit</span>
-                      </div>
-                    </>
+                    <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
                   ) : (
-                    <>
-                      <span className="material-symbols-outlined text-secondary/40 text-4xl mb-2">add_a_photo</span>
-                      <span className="text-[10px] uppercase tracking-widest text-secondary/40">Foto</span>
-                    </>
+                    <span className="material-symbols-outlined text-secondary/40 text-4xl">add_a_photo</span>
                   )}
                 </div>
-                <input 
-                  type="file" 
-                  ref={fileInputRef}
-                  onChange={handleImageChange}
-                  accept="image/*"
-                  className="hidden"
-                />
-                <p className="text-[10px] text-surface/40 mt-2 uppercase tracking-widest">Clique para alterar foto</p>
+                <input type="file" ref={fileInputRef} onChange={handleImageChange} accept="image/*" className="hidden" />
+                <p className="text-[10px] uppercase tracking-widest text-surface/30 font-bold">Foto do Perfil</p>
               </div>
 
-              <div className="space-y-6">
-                <div className="space-y-2">
-                  <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Nome Completo</label>
-                  <input 
-                    type="text" 
-                    className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors" 
-                    value={clientData.name}
-                    onChange={(e) => setClientData({...clientData, name: e.target.value})}
-                  />
+              {/* Campos de Texto */}
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase tracking-widest text-surface/50 ml-1 font-bold">Nome Completo</label>
+                  <input type="text" className="w-full bg-primary/60 border border-white/5 rounded-2xl py-4 px-5 text-sm focus:border-secondary outline-none transition-all text-surface" value={clientData.name} onChange={e => setClientData({...clientData, name: e.target.value})} />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Telefone de Contato</label>
-                  <input 
-                    type="tel" 
-                    className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors" 
-                    value={clientData.phone}
-                    onChange={(e) => setClientData({...clientData, phone: e.target.value})}
-                  />
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase tracking-widest text-surface/50 ml-1 font-bold">WhatsApp / Fone</label>
+                  <input type="tel" className="w-full bg-primary/60 border border-white/5 rounded-2xl py-4 px-5 text-sm focus:border-secondary outline-none transition-all text-surface" value={clientData.phone} onChange={e => setClientData({...clientData, phone: e.target.value})} />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Dia de Aniversário</label>
-                    <input 
-                      type="number" 
-                      min="1" 
-                      max="31" 
-                      className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors" 
-                      value={clientData.birth_day || ''}
-                      onChange={(e) => setClientData({...clientData, birth_day: e.target.value ? Number(e.target.value) : null})}
-                      placeholder="Dia"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Mês de Aniversário</label>
-                    <select 
-                      className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors appearance-none"
-                      value={clientData.birth_month || ''}
-                      onChange={(e) => setClientData({...clientData, birth_month: e.target.value ? Number(e.target.value) : null})}
-                    >
-                      <option value="">Mês...</option>
-                      <option value="1">Janeiro</option>
-                      <option value="2">Fevereiro</option>
-                      <option value="3">Março</option>
-                      <option value="4">Abril</option>
-                      <option value="5">Maio</option>
-                      <option value="6">Junho</option>
-                      <option value="7">Julho</option>
-                      <option value="8">Agosto</option>
-                      <option value="9">Setembro</option>
-                      <option value="10">Outubro</option>
-                      <option value="11">Novembro</option>
-                      <option value="12">Dezembro</option>
-                    </select>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Endereço (Opcional)</label>
-                  <textarea 
-                    className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors min-h-[100px]"
-                    value={clientData.address}
-                    onChange={(e) => setClientData({...clientData, address: e.target.value})}
-                  ></textarea>
-                </div>
-                 <div className="space-y-2">
-                  <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Status de Pagamento</label>
-                  <select 
-                    className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors appearance-none"
-                    value={clientData.payment_status}
-                    onChange={(e) => setClientData({...clientData, payment_status: e.target.value})}
-                  >
-                    <option value="Adimplente">Adimplente (Em dia)</option>
-                    <option value="Inadimplente">Inadimplente (Em débito)</option>
+              </div>
+
+              {/* Data de Aniversário */}
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase tracking-widest text-surface/50 ml-1 font-bold">Aniversário</label>
+                <div className="grid grid-cols-3 gap-3">
+                  <input type="number" min="1" max="31" placeholder="Dia" className="w-full bg-primary/60 border border-white/5 rounded-2xl py-4 px-5 text-sm text-center focus:border-secondary outline-none text-surface" value={clientData.birth_day || ''} onChange={e => setClientData({...clientData, birth_day: e.target.value ? Number(e.target.value) : null})} />
+                  <select className="col-span-2 bg-primary/60 border border-white/5 rounded-2xl py-4 px-5 text-sm focus:border-secondary outline-none appearance-none cursor-pointer text-surface" value={clientData.birth_month || ''} onChange={e => setClientData({...clientData, birth_month: e.target.value ? Number(e.target.value) : null})}>
+                    <option value="">Mês...</option>
+                    {['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'].map((m, i) => (
+                      <option key={m} value={i+1}>{m}</option>
+                    ))}
                   </select>
                 </div>
-                <div className="flex items-center gap-3 p-4 rounded-xl bg-white/5 border border-white/5">
-                   <input 
-                    type="checkbox" 
-                    id="vip" 
-                    className="w-5 h-5 accent-secondary bg-primary border-secondary/20 rounded cursor-pointer" 
-                    checked={clientData.is_vip}
-                    onChange={(e) => setClientData({...clientData, is_vip: e.target.checked})}
-                   />
-                   <label htmlFor="vip" className="text-sm text-surface cursor-pointer font-medium">Marcar como Cliente VIP</label>
+              </div>
+
+              {/* VIP e Financeiro */}
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase tracking-widest text-surface/50 ml-1 font-bold">Status Financeiro</label>
+                  <select className="w-full bg-primary/60 border border-white/5 rounded-2xl py-4 px-5 text-sm focus:border-secondary outline-none appearance-none cursor-pointer text-surface" value={clientData.payment_status} onChange={e => setClientData({...clientData, payment_status: e.target.value})}>
+                    <option value="Adimplente">Adimplente</option>
+                    <option value="Inadimplente">Inadimplente</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-3 p-4 rounded-2xl bg-white/5 border border-white/5">
+                   <input type="checkbox" id="vip" className="w-5 h-5 accent-secondary cursor-pointer" checked={clientData.is_vip} onChange={e => setClientData({...clientData, is_vip: e.target.checked})} />
+                   <label htmlFor="vip" className="text-sm cursor-pointer font-bold uppercase tracking-widest text-surface/80">Marcar como Cliente VIP</label>
                 </div>
               </div>
-            </section>
 
-            <div className="pt-6 flex flex-col sm:flex-row gap-4">
-              <button 
-                type="submit" 
-                disabled={isUploading}
-                className="flex-1 py-4 rounded-xl bg-secondary text-primary hover:bg-secondary/90 transition-colors text-sm font-bold uppercase tracking-widest shadow-lg shadow-secondary/20 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isUploading ? 'Salvando...' : 'Salvar Alterações'}
-              </button>
-              <Link to="/admin/clients" className="flex-1 py-4 rounded-xl border border-surface/20 text-surface/60 hover:text-surface hover:border-surface/40 transition-colors text-sm font-bold uppercase tracking-widest text-center">
-                Cancelar
-              </Link>
-            </div>
-          </form>
+              {/* Botões */}
+              <div className="pt-6 flex flex-col gap-3">
+                <button type="submit" disabled={isUploading} className="w-full py-5 rounded-2xl bg-secondary text-primary font-black uppercase tracking-[0.2em] text-[11px] shadow-lg shadow-secondary/10 active:scale-95 transition-all">
+                  {isUploading ? 'Processando...' : 'Confirmar Alterações'}
+                </button>
+                <Link to="/admin/clients" className="w-full py-5 rounded-2xl border border-white/10 text-surface/30 text-center font-bold uppercase tracking-widest text-[10px]">
+                  Cancelar
+                </Link>
+              </div>
+            </form>
+          </div>
         </div>
-      </div>
       </main>
-
       <BottomNavigation />
-
-      <NotificationModal 
-        isOpen={modalConfig.isOpen}
-        onClose={() => setModalConfig({ ...modalConfig, isOpen: false })}
-        title={modalConfig.title}
-        message={modalConfig.message}
-        type={modalConfig.type}
-      />
     </div>
   );
 }

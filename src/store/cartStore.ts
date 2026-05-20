@@ -1,11 +1,14 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
 
 export interface CartItem {
   id: string;
   name: string;
   price: number;
   image: string;
+  brand?: string;
+  model?: string;
+  color?: string;
   quantity: number;
 }
 
@@ -28,7 +31,7 @@ export const useCartStore = create<CartStore>()(
         if (existingItem) {
           return {
             items: state.items.map((i) =>
-              i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i
+              i.id === item.id ? { ...i, ...item, quantity: i.quantity + 1 } : i
             ),
           };
         }
@@ -52,6 +55,7 @@ export const useCartStore = create<CartStore>()(
     }),
     {
       name: 'cart-storage',
+      storage: createJSONStorage(() => sessionStorage),
     }
   )
 );

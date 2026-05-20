@@ -5,9 +5,9 @@ import BottomNavigation from '../../components/BottomNavigation';
 import { supabase } from '../../lib/supabase';
 import { toast } from 'sonner';
 import NotificationModal from '../../components/NotificationModal';
-import NotificationBell from '../../components/NotificationBell';
+import NotificationSino from '../../components/NotificationSino';
 import MenuButton from '../../components/MenuButton';
-import { maskCurrency, parseCurrency } from '../../lib/utils';
+import { formatCurrency, maskCurrency, parseCurrency } from '../../lib/utils';
 
 export default function AdminEditProduct() {
   const { id } = useParams();
@@ -29,13 +29,13 @@ export default function AdminEditProduct() {
   const [productData, setProductData] = useState({
     name: '',
     brand: '',
+    model: '',
     category: '',
     description: '',
     cost_price: 0,
     sale_price: 0,
     stock: 0,
     sku: '',
-    condition: '',
     accessories: '',
     colors: '',
     individual_ids: [] as string[],
@@ -51,6 +51,7 @@ export default function AdminEditProduct() {
   const [uploading, setUploading] = useState(false);
   const [costPrice, setCostPrice] = useState('');
   const [salePrice, setSalePrice] = useState('');
+  const [hasDiscount, setHasDiscount] = useState(false);
   const [discount, setDiscount] = useState('');
   const [stock, setStock] = useState('');
 
@@ -71,13 +72,13 @@ export default function AdminEditProduct() {
         setProductData({
           name: data.name,
           brand: data.brand,
+          model: data.model || '',
           category: data.category,
           description: data.description,
           cost_price: data.cost_price,
           sale_price: data.sale_price,
           stock: data.stock,
           sku: data.sku || '',
-          condition: data.condition,
           accessories: data.accessories,
           colors: Array.isArray(data.colors) ? data.colors.join(', ') : (data.colors || ''),
           individual_ids: data.individual_ids || [],
@@ -88,8 +89,9 @@ export default function AdminEditProduct() {
           published: data.published,
           featured: data.featured
         });
-        setCostPrice(data.cost_price ? maskCurrency(data.cost_price.toString()) : '');
-        setSalePrice(data.sale_price ? maskCurrency(data.sale_price.toString()) : '');
+        setCostPrice(data.cost_price ? formatCurrency(data.cost_price) : '');
+        setSalePrice(data.sale_price ? formatCurrency(data.sale_price) : '');
+        setHasDiscount(!!data.discount && data.discount > 0);
         setDiscount(data.discount ? data.discount.toString() : '');
         setStock(data.stock ? data.stock.toString() : '');
         setImagePreviews(data.images || (data.image_url || data.img ? [data.image_url || data.img] : []));
@@ -113,6 +115,16 @@ export default function AdminEditProduct() {
     if (!cost || !sale) return 0;
     return Math.round(((sale - cost) / cost) * 100);
   }, [costPrice, salePrice]);
+
+  // 🧮 NOVO CÁLCULO: Calcula automaticamente o preço final baseado no desconto
+  const discountedPrice = useMemo(() => {
+    const sale = parseCurrency(salePrice);
+    const disc = Number(discount);
+    if (!sale || isNaN(disc) || disc <= 0) return 0;
+    
+    // Fórmula: Preço - (Preço * (Desconto / 100))
+    return sale - (sale * (disc / 100));
+  }, [salePrice, discount]);
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -160,14 +172,12 @@ export default function AdminEditProduct() {
   const syncIndividualIds = (newStock: number) => {
     const currentIds = [...productData.individual_ids];
     if (newStock > currentIds.length) {
-      // Add more
       const baseSku = productData.sku || 'PROD';
       const additional = Array.from({ length: newStock - currentIds.length }, (_, i) => 
         `${baseSku}-${String(currentIds.length + i + 1).padStart(3, '0')}`
       );
       return [...currentIds, ...additional];
     } else if (newStock < currentIds.length) {
-      // Remove from end
       return currentIds.slice(0, newStock);
     }
     return currentIds;
@@ -177,7 +187,6 @@ export default function AdminEditProduct() {
     try {
       setUploading(true);
       
-      // 1. Upload new images
       let newImageUrls: string[] = [];
       for (const file of imageFiles) {
         const fileExt = file.name.split('.').pop();
@@ -211,19 +220,29 @@ export default function AdminEditProduct() {
           ...productData,
           cost_price: parseCurrency(costPrice),
           sale_price: parseCurrency(salePrice),
-          discount: Number(discount),
+          discount: hasDiscount ? Number(discount) : 0,
           stock: Number(stock),
           colors: typeof productData.colors === 'string' 
             ? productData.colors.split(',').map(c => c.trim()) 
             : (productData.colors || []),
           image_url: finalImageUrl,
           images: finalImages,
-          img: finalImageUrl // Keep img in sync for now
+          img: finalImageUrl 
         })
         .eq('id', id);
 
       if (error) throw error;
       
+      if (Number(stock) <= 2) {
+        await supabase.from('notifications').insert([{
+          type: 'estoque',
+          title: Number(stock) === 0 ? 'Produto Esgotado' : 'Baixo Estoque',
+          message: `O produto ${productData.name} está com ${stock} unidade(s) no estoque.`,
+          priority: Number(stock) === 0 ? 'high' : 'medium',
+          is_read: false
+        }]);
+      }
+
       setModalConfig({
         isOpen: true,
         title: 'Sucesso!',
@@ -249,8 +268,8 @@ export default function AdminEditProduct() {
     <div className="min-h-screen global-bg text-surface font-body flex flex-col">
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
-      <main className="flex-1 min-w-0 p-0 pb-28 overflow-y-auto">
-        <header className="sticky top-0 z-50 flex items-center justify-between px-6 py-4 bar-fume mb-10">
+      <main className="flex-1 min-w-0 p-0 pb-28 ">
+        <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 bar-fume mb-10">
           <div className="flex items-center gap-4">
             <MenuButton onClick={() => setIsSidebarOpen(true)} />
             <div>
@@ -263,11 +282,11 @@ export default function AdminEditProduct() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <NotificationBell />
+            <NotificationSino />
           </div>
         </header>
 
-        <div className="px-5 md:px-10">
+        <div className="px-5 md:px-10 pt-24">
           <div className="mb-8">
             <h2 className="font-headline text-3xl italic">Editar Peça</h2>
             <p className="text-surface/60 text-sm mt-1">Atualize as informações do produto ID: {id}</p>
@@ -299,6 +318,16 @@ export default function AdminEditProduct() {
                         value={productData.brand}
                         onChange={(e) => setProductData({...productData, brand: e.target.value})}
                         placeholder="Ex: Chanel, Hermès..."
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Modelo</label>
+                      <input 
+                        type="text" 
+                        className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors" 
+                        value={productData.model}
+                        onChange={(e) => setProductData({...productData, model: e.target.value})}
+                        placeholder="Ex: LT706, Classic Flap..."
                       />
                     </div>
                     <div className="space-y-2">
@@ -385,29 +414,52 @@ export default function AdminEditProduct() {
                       min="0" 
                     />
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Desconto (%)</label>
-                    <input 
-                      type="number" 
-                      inputMode="numeric"
-                      className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors" 
-                      value={discount}
-                      onChange={(e) => setDiscount(e.target.value)}
-                    />
+
+                  <div className="md:col-span-2 space-y-4">
+                    <div className="flex items-center justify-between p-4 rounded-xl bg-primary/20 border border-secondary/10">
+                      <div className="flex flex-col">
+                        <span className="text-sm text-surface">Oferecer Desconto?</span>
+                        <p className="text-[10px] text-surface/40 italic">Ative para definir uma porcentagem de desconto</p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="sr-only peer"
+                          checked={hasDiscount}
+                          onChange={(e) => {
+                            setHasDiscount(e.target.checked);
+                            if (!e.target.checked) setDiscount('');
+                          }}
+                        />
+                        <div className="w-11 h-6 bg-primary border border-secondary/30 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-secondary after:border-secondary after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-secondary/20"></div>
+                      </label>
+                    </div>
+
+                    {hasDiscount && (
+                      <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                        <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Desconto (%)</label>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors"
+                          value={discount}
+                          onChange={(e) => setDiscount(e.target.value)}
+                        />
+                        
+                        {/* 🌟 MOSTRAR O PREÇO FINAL CALCULADO AQUI */}
+                        {Number(discount) > 0 && discountedPrice > 0 && (
+                          <div className="mt-3 flex items-center justify-between p-3 rounded-lg bg-secondary/10 border border-secondary/20">
+                            <span className="text-[10px] uppercase tracking-[0.2em] text-secondary font-bold">Preço Final Calculado</span>
+                            <span className="text-sm font-bold text-secondary">
+                              R$ {discountedPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                        )}
+
+                      </div>
+                    )}
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Condição</label>
-                    <select 
-                      className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors appearance-none"
-                      value={productData.condition}
-                      onChange={(e) => setProductData({...productData, condition: e.target.value})}
-                    >
-                      <option value="novo">Novo / Never Worn</option>
-                      <option value="excelente">Excelente</option>
-                      <option value="muito-bom">Muito Bom</option>
-                      <option value="bom">Bom</option>
-                    </select>
-                  </div>
+
                   <div className="space-y-2">
                     <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Acompanha</label>
                     <input 
@@ -418,7 +470,7 @@ export default function AdminEditProduct() {
                     />
                   </div>
 
-                  <div className="md:col-span-2 space-y-2">
+                  <div className="space-y-2">
                     <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Cor Disponível</label>
                     <input 
                       type="text" 

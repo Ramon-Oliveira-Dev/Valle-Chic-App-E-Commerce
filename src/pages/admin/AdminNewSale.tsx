@@ -12,7 +12,8 @@ import {
   Menu,
   Search, 
   X,
-  ArrowLeft
+  ArrowLeft,
+  Star
 } from 'lucide-react';
 import Sidebar from '../../components/Sidebar';
 import BottomNavigation from '../../components/BottomNavigation';
@@ -20,8 +21,9 @@ import { toast } from 'sonner';
 import { supabase } from '../../lib/supabase';
 import { motion, AnimatePresence } from 'motion/react';
 import NotificationModal from '../../components/NotificationModal';
-import NotificationBell from '../../components/NotificationBell';
+import NotificationSino from '../../components/NotificationSino';
 import MenuButton from '../../components/MenuButton';
+import ProductImage from '../../components/ProductImage';
 import { maskCurrency, parseCurrency } from '../../lib/utils';
 
 interface Product {
@@ -36,6 +38,11 @@ interface Client {
   id: string;
   name: string;
   phone: string;
+  photo_url?: string;
+  image_url?: string;
+  status?: string;
+  payment_status?: string;
+  is_vip?: boolean;
 }
 
 export default function AdminNewSale() {
@@ -58,9 +65,9 @@ export default function AdminNewSale() {
   const [products, setProducts] = useState<Product[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [recentClients, setRecentClients] = useState<Client[]>([]);
-  const [recentClientsCount, setRecentClientsCount] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [filteredClients, setFilteredClients] = useState<Client[]>([]);
   
   const [selectedClient, setSelectedClient] = useState<string>('');
   const [selectedProducts, setSelectedProducts] = useState<{ product: Product; quantity: number }[]>([]);
@@ -90,7 +97,7 @@ export default function AdminNewSale() {
     try {
       const [productsRes, clientsRes] = await Promise.all([
         supabase.from('products').select('*').gt('stock', 0),
-        supabase.from('clients').select('*').order('name')
+        supabase.from('clients').select('*').order('created_at', { ascending: false })
       ]);
 
       if (productsRes.error) throw productsRes.error;
@@ -98,26 +105,9 @@ export default function AdminNewSale() {
 
       setProducts(productsRes.data || []);
       setClients(clientsRes.data || []);
+      setRecentClients((clientsRes.data || []).slice(0, 3));
+      setFilteredClients((clientsRes.data || []).slice(0, 3));
 
-      // Fetch recent clients from sales
-      const { data: recentSales } = await supabase
-        .from('sales')
-        .select('client_id, clients(*)')
-        .order('sale_date', { ascending: false })
-        .limit(20);
-      
-      if (recentSales) {
-        const uniqueClients: Client[] = [];
-        const seenIds = new Set();
-        recentSales.forEach(s => {
-          if (s.clients && !seenIds.has((s.clients as any).id)) {
-            uniqueClients.push(s.clients as any);
-            seenIds.add((s.clients as any).id);
-          }
-        });
-        setRecentClients(uniqueClients.slice(0, 5));
-        setRecentClientsCount(seenIds.size);
-      }
     } catch (error) {
       console.error('Error fetching data:', error);
       setModalConfig({
@@ -130,6 +120,20 @@ export default function AdminNewSale() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) {
+      setFilteredClients(recentClients);
+      return;
+    }
+
+    const filtered = clients.filter(c => 
+      c.name.toLowerCase().includes(term) || 
+      (c.phone && c.phone.includes(term))
+    );
+    setFilteredClients(filtered);
+  }, [searchTerm, clients, recentClients]);
 
   const addProductToSale = (product: Product) => {
     const existing = selectedProducts.find(p => p.product.id === product.id);
@@ -213,50 +217,34 @@ export default function AdminNewSale() {
 
       if (saleError) throw saleError;
 
-      // 2. Create Sale Items and Update Stock
+      // 2. Create Sale Items
+      const saleItemsData = selectedProducts.map(item => ({
+        sale_id: sale.id,
+        product_id: item.product.id,
+        quantity: item.quantity,
+        unit_price: item.product.sale_price
+      }));
+
+      const { error: itemsError } = await supabase.from('sale_items').insert(saleItemsData);
+      if (itemsError) throw itemsError;
+
+      // Deduct stock and unpublish if zero
       for (const item of selectedProducts) {
-        // Add sale item
-        const { error: itemError } = await supabase.from('sale_items').insert([{
-          sale_id: sale.id,
-          product_id: item.product.id,
-          quantity: item.quantity,
-          unit_price: item.product.sale_price
-        }]);
-        if (itemError) throw itemError;
-
-        // Update stock
         const newStock = item.product.stock - item.quantity;
-        const { error: stockError } = await supabase
-          .from('products')
-          .update({ 
-            stock: newStock,
-            published: newStock > 0 // Auto unpublish if stock is 0
-          })
-          .eq('id', item.product.id);
-        if (stockError) throw stockError;
-
-        // If stock is 0, create a notification
-        if (newStock === 0) {
-          await supabase.from('notifications').insert([{
-            type: 'stock',
-            title: 'Produto Esgotado',
-            message: `O produto ${item.product.name} acabou e foi removido do catálogo automaticamente.`,
-            priority: 'high',
-            is_read: false
-          }]);
+        
+        if (newStock < 0) {
+          // Rollback sale if stock is insufficient
+          await supabase.from('sales').delete().eq('id', sale.id);
+          throw new Error(`Estoque insuficiente para o produto ${item.product.name}`);
         }
 
-        // Record Inventory Movement (Exit)
-        await supabase.from('inventory_movements').insert([{
-          product_id: item.product.id,
-          type: 'exit',
-          quantity: item.quantity,
-          date: new Date(saleDate).toISOString(),
-          description: `Venda realizada (Venda #${sale.id.substring(0, 8)})`
-        }]);
+        await supabase.from('products').update({ 
+          stock: newStock,
+          published: newStock > 0 ? item.product.published : false
+        }).eq('id', item.product.id);
       }
 
-      // 3. Create Installments if there's a balance or it's crediario
+      // 4. Create Installments if there's a balance or it's crediario
       const balance = totalAmount - parseCurrency(amountPaid);
       if (balance > 0) {
         // Update client status to Inadimplente
@@ -319,18 +307,18 @@ export default function AdminNewSale() {
     <div className="min-h-screen global-bg text-surface font-body flex flex-col">
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
-      <main className="flex-1 min-w-0 p-0 pb-28 overflow-y-auto">
-        <header className="sticky top-0 z-50 flex items-center justify-between px-6 py-4 bar-fume mb-4">
+      <main className="flex-1 min-w-0 p-0 pb-28 ">
+        <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 bar-fume mb-4">
           <div className="flex items-center gap-4">
             <MenuButton onClick={() => setIsSidebarOpen(true)} />
             <h2 className="font-headline text-2xl italic">Nova Venda <span className="text-secondary">VC</span></h2>
           </div>
           <div className="flex items-center gap-4">
-            <NotificationBell />
+            <NotificationSino />
           </div>
         </header>
 
-        <div className="px-5 md:px-10 max-w-6xl mx-auto">
+        <div className="px-5 md:px-10 max-w-6xl mx-auto pt-24">
           <div className="mb-4 flex justify-end">
             <Link 
               to="/admin/sales"
@@ -345,102 +333,160 @@ export default function AdminNewSale() {
             {/* Left Column: Client & Products Selection */}
             <div className="lg:col-span-2 space-y-6">
               
-              {/* Client Selection - Optimized Layout */}
-              <section className="glass-card rounded-3xl p-8 border border-secondary/10 shadow-2xl relative overflow-hidden group">
-                <div className="absolute -top-12 -right-12 w-32 h-32 bg-secondary/5 rounded-full blur-3xl group-hover:bg-secondary/10 transition-colors" />
-                
-                <div className="flex items-center justify-between mb-8">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-2xl bg-secondary/10 flex items-center justify-center shadow-inner border border-secondary/10">
-                      <User className="text-secondary w-6 h-6" />
-                    </div>
-                    <div>
-                      <h3 className="text-secondary text-[10px] font-bold uppercase tracking-[0.3em] mb-1">Identificação</h3>
-                      <p className="text-surface/60 text-[10px] font-bold uppercase tracking-widest">Selecione o cliente para vincular a venda</p>
-                    </div>
-                  </div>
-                  
-                  {recentClientsCount > 0 && (
-                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
-                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      <span className="text-[8px] uppercase tracking-widest font-bold text-emerald-400">
-                        {recentClientsCount} Recentes
-                      </span>
-                    </div>
-                  )}
-                </div>
+              {/* Full Screen Blur Overlay */}
+              <AnimatePresence>
+                {showSuggestions && (
+                  <motion.div 
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="fixed inset-0 z-40 bg-[#0A1128]/30 backdrop-blur-[20px]"
+                    onClick={() => setShowSuggestions(false)}
+                  />
+                )}
+              </AnimatePresence>
 
+              {/* Client Selection - Optimized Layout */}
+              <section className="relative z-[51] mb-8">
                 <div className="relative">
-                  <div className="relative group/search">
-                    <div className="absolute left-6 top-1/2 -translate-y-1/2 text-secondary/40 group-focus-within/search:text-secondary transition-colors">
-                      <Search className="w-5 h-5" />
+                  {!selectedClient ? (
+                    <div className="relative group/search">
+                      <div className="absolute left-4 top-1/2 -translate-y-1/2 text-secondary/40 group-focus-within/search:text-secondary transition-colors">
+                        <Search className="w-4 h-4" />
+                      </div>
+                      <input 
+                        type="text"
+                        placeholder="Buscar cliente por nome ou telefone..."
+                        value={searchTerm}
+                        onChange={(e) => {
+                          setSearchTerm(e.target.value);
+                          setShowSuggestions(true);
+                        }}
+                        onFocus={() => setShowSuggestions(true)}
+                        className="w-full bg-primary/40 backdrop-blur-md border border-secondary/20 rounded-2xl h-14 pl-12 pr-12 text-surface font-sans text-base focus:outline-none focus:border-secondary/50 focus:ring-2 focus:ring-secondary/20 transition-all shadow-lg placeholder:text-surface/30"
+                      />
+                      {searchTerm && (
+                        <button 
+                          type="button"
+                          onClick={() => {
+                            setSearchTerm('');
+                            setSelectedClient('');
+                          }}
+                          className="absolute right-4 top-1/2 -translate-y-1/2 text-surface/30 hover:text-secondary transition-colors"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
+                      )}
                     </div>
-                    <input 
-                      type="text"
-                      placeholder="Buscar cliente por nome ou ID..."
-                      value={searchTerm}
-                      onChange={(e) => {
-                        setSearchTerm(e.target.value);
-                        setShowSuggestions(true);
-                      }}
-                      onFocus={() => setShowSuggestions(true)}
-                      className="w-full bg-primary/20 backdrop-blur-md border border-secondary/10 rounded-2xl py-4 pl-14 pr-12 text-surface font-sans font-bold text-lg focus:outline-none focus:border-secondary/40 focus:ring-4 focus:ring-secondary/5 transition-all shadow-sm placeholder:text-surface/20"
-                    />
-                    {searchTerm && (
+                  ) : (
+                    <div className="flex items-center justify-between bg-primary/40 backdrop-blur-md border border-secondary/30 rounded-2xl p-3 shadow-lg">
+                      <div className="flex items-center gap-4">
+                        <div className="relative shrink-0">
+                          <div className="w-11 h-11 rounded-full flex items-center justify-center shadow-lg border border-[#D4AF37] overflow-hidden bg-[#151E3F]">
+                            {(clients.find(c => c.id === selectedClient)?.photo_url || clients.find(c => c.id === selectedClient)?.image_url) ? (
+                              <img 
+                                src={clients.find(c => c.id === selectedClient)?.photo_url || clients.find(c => c.id === selectedClient)?.image_url} 
+                                alt={clients.find(c => c.id === selectedClient)?.name} 
+                                className="w-full h-full object-cover"
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
+                              <span className="text-[#D4AF37] font-headline text-[18px]">
+                                {clients.find(c => c.id === selectedClient)?.name.charAt(0).toUpperCase()}
+                              </span>
+                            )}
+                          </div>
+                          {clients.find(c => c.id === selectedClient)?.is_vip && (
+                            <div className="absolute -top-1 -right-1 w-5 h-5 bg-secondary rounded-full flex items-center justify-center shadow-lg border-2 border-primary">
+                              <Star className="w-3 h-3 text-primary fill-primary" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex flex-col justify-center">
+                          <p className="text-white font-headline text-base">{clients.find(c => c.id === selectedClient)?.name}</p>
+                          <p className="text-xs text-surface/50">
+                            {clients.find(c => c.id === selectedClient)?.phone || `ID: ${selectedClient.slice(0, 8)}`}
+                          </p>
+                        </div>
+                      </div>
                       <button 
                         type="button"
                         onClick={() => {
                           setSearchTerm('');
                           setSelectedClient('');
                         }}
-                        className="absolute right-6 top-1/2 -translate-y-1/2 text-surface/20 hover:text-secondary transition-colors"
+                        className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center text-surface/40 hover:text-secondary hover:bg-secondary/10 transition-colors shrink-0"
                       >
                         <X className="w-5 h-5" />
                       </button>
-                    )}
-                  </div>
+                    </div>
+                  )}
 
                   {/* Autocomplete Suggestions */}
                   <AnimatePresence>
-                    {showSuggestions && (searchTerm.length > 0 || clients.length > 0) && (
+                    {showSuggestions && (
                       <motion.div 
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: 10 }}
-                        className="absolute z-[60] left-0 right-0 mt-2 bg-primary/95 backdrop-blur-xl border border-secondary/20 rounded-2xl shadow-2xl overflow-hidden max-h-[300px] overflow-y-auto custom-scrollbar-dark"
+                        className="absolute left-0 right-0 mt-4 max-h-[60vh] overflow-y-auto custom-scrollbar-dark"
                       >
-                        {clients
-                          .filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()) || c.id.includes(searchTerm))
-                          .map(client => (
-                            <button
-                              key={client.id}
-                              type="button"
-                              onClick={() => {
-                                setSelectedClient(client.id);
-                                setSearchTerm(client.name);
-                                setShowSuggestions(false);
-                              }}
-                              className="w-full flex items-center gap-4 p-4 hover:bg-secondary/10 transition-colors text-left border-b border-secondary/5 last:border-0"
-                            >
-                              <div className="w-10 h-10 rounded-full bg-secondary/10 flex items-center justify-center text-secondary font-bold border border-secondary/10 shrink-0">
-                                {client.name.charAt(0)}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-surface font-bold truncate">{client.name}</p>
-                                <p className="text-[10px] text-surface/40 uppercase tracking-widest">ID: {client.id.slice(0, 8)}...</p>
-                              </div>
-                              {selectedClient === client.id && (
-                                <div className="w-2 h-2 rounded-full bg-secondary shadow-[0_0_10px_rgba(255,215,0,0.5)]" />
-                              )}
-                            </button>
-                          ))}
-                        
-                        {clients.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()) || c.id.includes(searchTerm)).length === 0 && (
-                          <div className="p-8 text-center">
-                            <p className="text-surface/40 text-xs italic mb-4">Nenhum cliente encontrado.</p>
+                        {filteredClients.length > 0 ? (
+                          <div className="flex flex-col gap-2">
+                            {filteredClients.map(client => (
+                              <button
+                                key={client.id}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedClient(client.id);
+                                  setSearchTerm(client.name);
+                                  setShowSuggestions(false);
+                                }}
+                                className="w-full flex items-center gap-4 p-3 glass-card hover:bg-white/5 border border-secondary/10 rounded-2xl transition-colors text-left mb-2"
+                              >
+                                <div className="relative shrink-0">
+                                  <div className="w-11 h-11 rounded-full flex items-center justify-center shadow-lg border border-[#D4AF37] overflow-hidden bg-[#151E3F]">
+                                    {(client.photo_url || client.image_url) ? (
+                                      <img 
+                                        src={client.photo_url || client.image_url} 
+                                        alt={client.name} 
+                                        className="w-full h-full object-cover"
+                                        referrerPolicy="no-referrer"
+                                      />
+                                    ) : (
+                                      <span className="text-[#D4AF37] font-headline text-[18px]">
+                                        {client.name.charAt(0).toUpperCase()}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {client.is_vip && (
+                                    <div className="absolute -top-1 -right-1 w-5 h-5 bg-secondary rounded-full flex items-center justify-center shadow-lg border-2 border-primary">
+                                      <Star className="w-3 h-3 text-primary fill-primary" />
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                  <div className="flex items-center gap-2">
+                                    <p className="text-white font-headline text-base truncate">{client.name}</p>
+                                    {client.phone && (
+                                      <p className="text-sm text-surface/50 truncate">- {client.phone}</p>
+                                    )}
+                                  </div>
+                                  <div className="mt-1">
+                                    <span className={`inline-flex px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-widest ${(client.status || 'Ativo') === 'Pendente' ? 'bg-rose-500/10 text-rose-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
+                                      {client.status || 'Ativo'}
+                                    </span>
+                                  </div>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="p-6 text-center">
+                            <p className="text-secondary/80 text-xs font-bold uppercase tracking-widest mb-4">Nenhum cliente cadastrado com este nome</p>
                             <Link 
-                              to="/admin/clients" 
-                              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-secondary text-primary font-bold uppercase tracking-widest text-[10px] hover:bg-secondary/90 transition-all"
+                              to="/admin/clients/new" 
+                              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-secondary/30 text-secondary font-bold uppercase tracking-widest text-[10px] hover:bg-secondary/10 transition-all"
                             >
                               <Plus className="w-3 h-3" />
                               Cadastrar Novo
@@ -450,31 +496,6 @@ export default function AdminNewSale() {
                       </motion.div>
                     )}
                   </AnimatePresence>
-
-                  {/* Recent Clients Bar */}
-                  {recentClients.length > 0 && !selectedClient && (
-                    <div className="mt-6">
-                      <p className="text-[8px] uppercase tracking-[0.2em] text-surface/40 font-bold mb-3">Clientes Recentes</p>
-                      <div className="flex flex-wrap gap-3">
-                        {recentClients.map(client => (
-                          <button
-                            key={client.id}
-                            type="button"
-                            onClick={() => {
-                              setSelectedClient(client.id);
-                              setSearchTerm(client.name);
-                            }}
-                            className="flex items-center gap-2 p-1.5 pr-4 rounded-full bg-primary/40 border border-secondary/10 hover:border-secondary/40 hover:bg-secondary/5 transition-all group"
-                          >
-                            <div className="w-7 h-7 rounded-full bg-secondary/10 flex items-center justify-center text-secondary text-[10px] font-bold border border-secondary/10 group-hover:bg-secondary group-hover:text-primary transition-all">
-                              {client.name.charAt(0)}
-                            </div>
-                            <span className="text-[10px] font-bold text-surface/60 group-hover:text-surface transition-colors">{client.name.split(' ')[0]}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </div>
               </section>
 
@@ -494,7 +515,7 @@ export default function AdminNewSale() {
                     >
                       <div className="w-full aspect-square rounded-lg bg-primary/40 mb-2 overflow-hidden border border-secondary/5">
                         {product.image_url ? (
-                          <img src={product.image_url} alt={product.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                          <ProductImage src={product.image_url} alt={product.name} className="transition-opacity duration-500" />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center text-surface/20">
                             <ImageIcon className="w-6 h-6" />

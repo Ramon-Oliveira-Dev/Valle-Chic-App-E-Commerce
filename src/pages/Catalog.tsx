@@ -4,6 +4,11 @@ import { useCartStore } from '../store/cartStore';
 import { supabase } from '../lib/supabase';
 import BottomNavigation from '../components/BottomNavigation';
 import Sidebar from '../components/Sidebar';
+import ProductImage from '../components/ProductImage';
+import { productToCartItem } from '../lib/productMetadata';
+
+const normalizeCategory = (category?: string | null) =>
+  category?.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim() || '';
 
 export default function Catalog() {
   const navigate = useNavigate();
@@ -32,7 +37,7 @@ export default function Catalog() {
       setProducts(data || []);
       
       if (data) {
-        const cats = new Set(data.map(p => p.category?.toLowerCase()));
+        const cats = new Set(data.map(p => normalizeCategory(p.category)));
         setAvailableCategories(cats);
       }
     } catch (error) {
@@ -77,16 +82,16 @@ export default function Catalog() {
         </Link>
       </header>
 
-      <main className="flex-grow pt-24 pb-32 px-4 md:px-6 w-full min-w-0">
+      <main className="grow pt-24 pb-32 px-4 md:px-6 w-full min-w-0">
         <div className="max-w-7xl mx-auto w-full min-w-0">
           <header className="mb-8 text-center space-y-3">
             <h1 className="font-headline text-4xl md:text-5xl text-surface italic">Catálogo</h1>
-            <p className="font-label text-[10px] md:text-xs uppercase tracking-[0.2em] text-secondary/80">A coleção completa Vallechic</p>
+            <p className="font-label text-[10px] md:text-xs uppercase tracking-[0.2em] text-secondary/80">A coleção completa Valle Chic</p>
           </header>
 
           {/* Category Navigation (Same as Home) */}
           <div className="flex overflow-x-auto no-scrollbar gap-4 mb-10 pb-2 md:justify-center px-2">
-            <Link to="/catalog" className="flex flex-col items-center gap-2 min-w-[60px]">
+            <Link to="/catalog" className="flex flex-col items-center gap-2 min-w-15">
               <div className="w-14 h-14 rounded-full bg-secondary/10 flex items-center justify-center border border-secondary/5 glass-card active">
                 <span className="material-symbols-outlined text-secondary text-xl">shopping_bag</span>
               </div>
@@ -94,7 +99,7 @@ export default function Catalog() {
             </Link>
             
             {availableCategories.has('maletas') && (
-              <Link to="/maletas" className="flex flex-col items-center gap-2 min-w-[60px]">
+              <Link to="/maletas" className="flex flex-col items-center gap-2 min-w-15">
                 <div className="w-14 h-14 rounded-full bg-secondary/5 flex items-center justify-center border border-secondary/5 glass-card">
                   <span className="material-symbols-outlined text-secondary/60 text-xl">business_center</span>
                 </div>
@@ -103,7 +108,7 @@ export default function Catalog() {
             )}
 
             {availableCategories.has('carteiras') && (
-              <Link to="/carteiras" className="flex flex-col items-center gap-2 min-w-[60px]">
+              <Link to="/carteiras" className="flex flex-col items-center gap-2 min-w-15">
                 <div className="w-14 h-14 rounded-full bg-secondary/5 flex items-center justify-center border border-secondary/5 glass-card">
                   <span className="material-symbols-outlined text-secondary/60 text-xl">wallet</span>
                 </div>
@@ -112,9 +117,9 @@ export default function Catalog() {
             )}
 
             {availableCategories.has('acessorios') && (
-              <Link to="/acessorios" className="flex flex-col items-center gap-2 min-w-[60px]">
+              <Link to="/acessorios" className="flex flex-col items-center gap-2 min-w-15">
                 <div className="w-14 h-14 rounded-full bg-secondary/5 flex items-center justify-center border border-secondary/5 glass-card">
-                  <span className="material-symbols-outlined text-secondary/60 text-xl">diamond</span>
+                  <span className="material-symbols-outlined text-secondary/60 text-xl">styler</span>
                 </div>
                 <span className="text-[9px] uppercase tracking-[0.15em] text-surface/40">Acessórios</span>
               </Link>
@@ -125,43 +130,65 @@ export default function Catalog() {
             {loading ? (
               Array.from({ length: 8 }).map((_, i) => (
                 <div key={i} className="animate-pulse flex flex-col">
-                  <div className="aspect-[3/4] bg-primary/20 rounded-xl mb-4"></div>
+                  <div className="aspect-3/4 bg-primary/20 rounded-xl mb-4"></div>
                   <div className="h-4 bg-primary/20 rounded w-1/2 mb-2"></div>
                   <div className="h-6 bg-primary/20 rounded w-3/4"></div>
                 </div>
               ))
             ) : products.map((product) => (
               <div key={product.id} className="group flex flex-col">
-                <div className="aspect-[3/4] bg-primary/40 overflow-hidden luxury-border relative rounded-xl mb-4 glass-card">
+                <div className="aspect-3/4 bg-primary/40 overflow-hidden luxury-border relative rounded-xl mb-4 glass-card">
                   <Link to={`/product/${product.id}`}>
-                    <img alt={product.name} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" src={product.image_url || product.img || 'https://picsum.photos/seed/product/400/600'} referrerPolicy="no-referrer" />
+                    <ProductImage alt={product.name} className="transition-opacity duration-700" src={product.image_url || product.img || 'https://picsum.photos/seed/product/400/600'} referrerPolicy="no-referrer" />
                   </Link>
                   <div className="absolute top-3 left-3 flex flex-col gap-1">
-                    {product.is_new && (
+                    {product.is_new ? (
                       <span className="bg-secondary text-primary px-2 py-1 text-[8px] tracking-widest uppercase font-bold rounded-sm w-fit">Novidade</span>
-                    )}
-                    {product.discount && product.discount > 0 && (
+                    ) : null}
+                    {product.discount > 0 ? (
                       <span className="bg-red-800/90 text-white px-2 py-1 text-[8px] tracking-widest uppercase font-bold rounded-sm w-fit">-{product.discount}% OFF</span>
-                    )}
+                    ) : null}
                   </div>
                   <button 
-                    onClick={() => addItem({ id: product.id, name: product.name, price: product.sale_price, image: product.image_url || product.img })}
+                    onClick={() => addItem(productToCartItem(
+                      product,
+                      product.discount > 0
+                        ? (product.discounted_price ?? (product.sale_price ? product.sale_price * (1 - product.discount / 100) : product.sale_price))
+                        : product.sale_price
+                    ))}
                     className="absolute bottom-3 right-3 w-10 h-10 bg-primary/80 backdrop-blur-md rounded-full flex items-center justify-center text-surface opacity-0 translate-y-4 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300 hover:bg-secondary hover:text-primary active:scale-90"
                   >
                     <span className="material-symbols-outlined text-xl">shopping_cart</span>
                   </button>
                 </div>
-                <div className="flex flex-col flex-grow">
-                  <p className="text-[10px] tracking-[0.2em] text-surface/40 uppercase mb-1">{product.brand || 'Vallechic'}</p>
+                <div className="flex flex-col grow">
+                  <p className="text-[10px] tracking-[0.2em] text-surface/40 uppercase mb-1">{product.brand || 'Valle Chic'}</p>
                   <Link to={`/product/${product.id}`}>
-                    <h3 className="font-headline text-lg text-surface leading-tight mb-2 flex-grow hover:text-secondary transition-colors">{product.name}</h3>
+                    <h3 className="font-headline text-lg text-surface leading-tight mb-2 grow hover:text-secondary transition-colors">{product.name}</h3>
                   </Link>
                   <div className="flex items-center gap-2 mb-4">
-                    <p className="text-sm font-medium text-secondary">R$ {(product.discount && product.discount > 0 ? product.discounted_price : product.sale_price)?.toLocaleString('pt-BR')}</p>
-                    {product.discount && product.discount > 0 && (
+                    <p className="text-sm font-medium text-secondary">R$ {(product.discount > 0 ? product.discounted_price : product.sale_price)?.toLocaleString('pt-BR')}</p>
+                    {product.discount > 0 ? (
                       <p className="text-xs text-surface/40 line-through">R$ {product.sale_price?.toLocaleString('pt-BR')}</p>
-                    )}
+                    ) : null}
                   </div>
+                  <button
+                    onClick={() => addItem(productToCartItem(
+                      product,
+                      product.discount > 0
+                        ? (product.discounted_price ?? (product.sale_price ? product.sale_price * (1 - product.discount / 100) : product.sale_price))
+                        : product.sale_price
+                    ))}
+                    className={`w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-xs font-bold uppercase tracking-[0.15em] transition-all duration-200 ${
+                      product.stock > 0
+                        ? 'bg-secondary text-primary hover:bg-secondary/90 active:scale-95 shadow-lg shadow-secondary/20'
+                        : 'bg-surface/10 text-surface/40 cursor-not-allowed'
+                    }`}
+                    disabled={product.stock <= 0}
+                  >
+                    <span className="material-symbols-outlined text-sm">shopping_cart</span>
+                    {product.stock > 0 ? 'Adicionar' : 'Esgotado'}
+                  </button>
                 </div>
               </div>
             ))}

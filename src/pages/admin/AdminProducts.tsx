@@ -2,24 +2,19 @@ import { Link } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import Sidebar from '../../components/Sidebar';
 import BottomNavigation from '../../components/BottomNavigation';
-import { 
-  ChevronLeft,
-  ChevronRight
-} from 'lucide-react';
+import { motion } from 'motion/react';
 import { supabase } from '../../lib/supabase';
 import { toast } from 'sonner';
 import NotificationModal from '../../components/NotificationModal';
-import NotificationBell from '../../components/NotificationBell';
+import NotificationSino from '../../components/NotificationSino';
 import MenuButton from '../../components/MenuButton';
+import ProductImage from '../../components/ProductImage';
 
 export default function AdminProducts() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [products, setProducts] = useState<any[]>([]);
   const [soldProducts, setSoldProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalCount, setTotalCount] = useState(0);
-  const itemsPerPage = 10;
   const [modalConfig, setModalConfig] = useState<{
     isOpen: boolean;
     title: string;
@@ -35,20 +30,18 @@ export default function AdminProducts() {
   useEffect(() => {
     fetchProducts();
     fetchSoldProducts();
-  }, [currentPage]);
+  }, []);
 
   const fetchProducts = async () => {
     try {
       setLoading(true);
-      const { data, error, count } = await supabase
+      const { data, error } = await supabase
         .from('products')
-        .select('*', { count: 'exact' })
-        .order('name')
-        .range((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage - 1);
+        .select('*')
+        .order('name');
 
       if (error) throw error;
       setProducts(data || []);
-      setTotalCount(count || 0);
     } catch (error) {
       console.error('Error fetching products:', error);
       setModalConfig({
@@ -83,8 +76,7 @@ export default function AdminProducts() {
             )
           )
         `)
-        .order('created_at', { ascending: false })
-        .limit(50);
+        .order('created_at', { ascending: false });
 
       if (error) throw error;
 
@@ -177,8 +169,8 @@ export default function AdminProducts() {
     <div className="min-h-screen global-bg text-surface font-body flex flex-col">
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
-      <main className="flex-1 min-w-0 p-0 pb-28 overflow-y-auto">
-        <header className="sticky top-0 z-50 flex items-center justify-between px-6 py-4 bar-fume mb-10">
+      <main className="flex-1 min-w-0 p-0 pb-28 ">
+        <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 bar-fume mb-10">
           <div className="flex items-center gap-4">
             <MenuButton onClick={() => setIsSidebarOpen(true)} />
             <div>
@@ -186,11 +178,11 @@ export default function AdminProducts() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <NotificationBell />
+            <NotificationSino />
           </div>
         </header>
 
-        <div className="px-5 md:px-10">
+        <div className="px-5 md:px-10 pt-24">
           <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
             <div>
               <h2 className="font-headline text-3xl italic">Gestão de Produtos</h2>
@@ -226,7 +218,7 @@ export default function AdminProducts() {
                   {products.map((product) => (
                     <tr key={product.id} className="border-b border-secondary/5 hover:bg-white/5 transition-colors">
                       <td className="py-4">
-                        <img src={product.img || 'https://picsum.photos/seed/product/100/100'} alt={product.name} className="w-10 h-10 rounded-lg object-cover" referrerPolicy="no-referrer" />
+                        <ProductImage src={product.img || 'https://picsum.photos/seed/product/100/100'} alt={product.name} className="w-10 h-10 rounded-lg" referrerPolicy="no-referrer" />
                       </td>
                       <td className="py-4">
                         <p className="font-medium">{product.name}</p>
@@ -274,7 +266,7 @@ export default function AdminProducts() {
               {products.map((product) => (
                 <div key={product.id} className="p-4 rounded-xl bg-white/5 border border-white/5 space-y-4">
                   <div className="flex gap-4">
-                    <img src={product.img || 'https://picsum.photos/seed/product/100/100'} alt={product.name} className="w-16 h-16 rounded-lg object-cover border border-secondary/20" referrerPolicy="no-referrer" />
+                    <ProductImage src={product.img || 'https://picsum.photos/seed/product/100/100'} alt={product.name} className="w-16 h-16 rounded-lg border border-secondary/20" referrerPolicy="no-referrer" />
                     <div className="flex-1 min-w-0">
                       <p className="font-medium truncate">{product.name}</p>
                       <p className="text-[10px] text-surface/60 uppercase tracking-widest font-mono">{product.sku || `VC-${product.id.slice(0,4).toUpperCase()}`}</p>
@@ -318,34 +310,6 @@ export default function AdminProducts() {
               ))}
             </div>
           </div>
-
-          {/* Pagination */}
-          {totalCount > itemsPerPage && (
-            <div className="flex items-center justify-between mt-6 pt-6 border-t border-secondary/10">
-              <p className="text-sm text-surface/60">
-                Mostrando {((currentPage - 1) * itemsPerPage) + 1} a {Math.min(currentPage * itemsPerPage, totalCount)} de {totalCount} produtos
-              </p>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                  disabled={currentPage === 1}
-                  className="p-2 rounded-lg bg-primary/40 text-surface/60 hover:bg-primary/60 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <span className="px-3 py-1 bg-secondary/20 text-secondary font-bold rounded">
-                  {currentPage} / {Math.ceil(totalCount / itemsPerPage)}
-                </span>
-                <button
-                  onClick={() => setCurrentPage(prev => Math.min(Math.ceil(totalCount / itemsPerPage), prev + 1))}
-                  disabled={currentPage === Math.ceil(totalCount / itemsPerPage)}
-                  className="p-2 rounded-lg bg-primary/40 text-surface/60 hover:bg-primary/60 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          )}
 
           {soldProducts.length > 0 && (
             <div className="glass-card rounded-2xl p-6">

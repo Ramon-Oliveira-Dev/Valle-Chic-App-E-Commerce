@@ -12,7 +12,7 @@ export default function Contact() {
     <div className="relative flex h-auto min-h-screen w-full flex-col group/design-root overflow-x-hidden pb-24 font-display text-surface global-bg">
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
       
-      <header className="sticky top-0 w-full z-50 flex items-center justify-between px-6 py-4 bar-fume">
+      <header className="fixed top-0 left-0 right-0  z-50 flex items-center justify-between px-6 py-4 bar-fume">
         <button 
           onClick={() => setIsSidebarOpen(true)}
           className="w-10 h-10 rounded-full border border-secondary/20 overflow-hidden flex items-center justify-center bg-primary active:scale-90 transition-transform"
@@ -35,13 +35,13 @@ export default function Contact() {
         </Link>
       </header>
 
-      <div className="w-full max-w-md mx-auto">
+      <div className="w-full max-w-md mx-auto pt-24">
         <div className="sm:px-4 sm:py-3">
           <div className="relative w-full bg-center bg-no-repeat bg-cover flex flex-col justify-end overflow-hidden sm:rounded-xl min-h-[300px] shadow-2xl" style={{backgroundImage: 'url("https://lh3.googleusercontent.com/aida-public/AB6AXuCp7ZAM9Xl2SArYuMCmGVVBuuBD_2zjqmHJEKLIN0LxHrQnFS0RcENLvUrCL_Zxu9IrVZWRuw0Ac4pP9qA2rAwMeEmi5m28hVb2Xv8MFgX6MnJFTKeJMYhKbROlkKUUwCAmCHg-lcdMxs5FsQrtJijFvbX2i-Bc9YOAOD5xZZ-GxNMAr3CEQ4Mdbonq-IhNtbJtcrsNC7nEJQtCNRikbmsPLItkI94d5ybJ0IiHX3CAR02euN_FJ51uSU12u8oUGk7v6VAgB25Sn3U")'}}>
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent"></div>
             <div className="relative p-6">
               <span className="bg-secondary px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-[0.2em] text-primary mb-3 inline-block">Premium Boutique</span>
-              <h1 className="text-white text-4xl font-extrabold leading-tight tracking-tight drop-shadow-md">Vallechic World</h1>
+              <h1 className="text-white text-4xl font-extrabold leading-tight tracking-tight drop-shadow-md">Valle Chic World</h1>
             </div>
           </div>
         </div>
@@ -51,7 +51,7 @@ export default function Contact() {
       <div className="flex justify-center mt-4">
         <div className="flex gap-6 items-center px-4 py-3">
           <a 
-            href="https://www.instagram.com/vallechic.bolsas/" 
+            href="https://www.instagram.com/Valle Chic.bolsas/" 
             target="_blank" 
             rel="noopener noreferrer"
             className="w-14 h-14 rounded-full glass-button flex items-center justify-center text-secondary transition-all duration-300 hover:scale-110 active:scale-95"
@@ -69,7 +69,7 @@ export default function Contact() {
           </a>
           
           <a 
-            href="https://www.tiktok.com/@vallechic7" 
+            href="https://www.tiktok.com/@Valle Chic7" 
             target="_blank" 
             rel="noopener noreferrer"
             className="w-14 h-14 rounded-full glass-button flex items-center justify-center text-secondary transition-all duration-300 hover:scale-110 active:scale-95"
@@ -113,10 +113,11 @@ export default function Contact() {
       </div>
 
       <div className="mt-16 text-center px-6 pb-10">
-        <p className="text-[9px] text-surface/20 uppercase tracking-[0.4em] font-medium">© 2026 VALLECHIC | All Rights Reserved</p>
+        <p className="text-[9px] text-surface/20 uppercase tracking-[0.4em] font-medium">© 2026 Valle Chic | All Rights Reserved</p>
       </div>
 
       <BottomNavigation />
     </div>
   );
 }
+
