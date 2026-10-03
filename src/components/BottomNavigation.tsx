@@ -51,7 +51,7 @@ export default function BottomNavigation() {
   }, [safeActiveIndex]);
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 safe-pb h-20 max-md:rounded-t-[24px]">
+    <nav className="fixed bottom-0 left-0 right-0 z-50 safe-pb h-20 max-md:rounded-t-[24px] lg:hidden">
       {/* Background container with overflow hidden to prevent leaking */}
       <div className="absolute inset-0 bar-fume shadow-[0_-10px_40px_rgba(0,0,0,0.4)] max-md:rounded-t-[24px] max-md:overflow-hidden"></div>
       

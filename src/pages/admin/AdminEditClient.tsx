@@ -3,13 +3,16 @@ import React, { useState, useEffect, useRef } from 'react';
 import Sidebar from '../../components/Sidebar';
 import BottomNavigation from '../../components/BottomNavigation';
 import { supabase } from '../../lib/supabase';
+import { api } from '../../services/api';
 import { toast } from 'sonner';
 import NotificationModal from '../../components/NotificationModal';
 import NotificationSino from '../../components/NotificationSino';
 import MenuButton from '../../components/MenuButton';
 import imageCompression from 'browser-image-compression';
+import { useTheme } from '../../contexts/ThemeContext';
 
 export default function AdminEditClient() {
+  const { isDesktopSidebarCollapsed } = useTheme();
   const { id } = useParams();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -109,20 +112,35 @@ export default function AdminEditClient() {
 
       // Upload da imagem se houver uma nova selecionada
       if (imageFile) {
-        const options = { maxSizeMB: 0.5, maxWidthOrHeight: 800, useWebWorker: true };
-        const compressed = await imageCompression(imageFile, options);
-        const fileName = `${Date.now()}-${imageFile.name}`;
-        const { error: uploadError } = await supabase.storage
-          .from('product-images')
-          .upload(`clients/${fileName}`, compressed);
-        
-        if (uploadError) throw uploadError;
-        
-        const { data: { publicUrl } } = supabase.storage
-          .from('product-images')
-          .getPublicUrl(`clients/${fileName}`);
-        
-        finalImageUrl = publicUrl;
+        try {
+          const options = { maxSizeMB: 0.5, maxWidthOrHeight: 800, useWebWorker: false };
+          let fileToUpload: File | Blob = imageFile;
+          try {
+            fileToUpload = await imageCompression(imageFile, options);
+          } catch {
+            fileToUpload = imageFile;
+          }
+
+          const fileExt = imageFile.name.split('.').pop()?.toLowerCase() || 'jpg';
+          const cleanExt = fileExt.replace(/[^a-z0-9]/g, '') || 'jpg';
+          const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}.${cleanExt}`;
+          const path = `clients/${fileName}`;
+
+          const { error: uploadError } = await supabase.storage
+            .from('product-images')
+            .upload(path, fileToUpload, { upsert: true });
+
+          if (uploadError) throw uploadError;
+
+          const { data: { publicUrl } } = supabase.storage
+            .from('product-images')
+            .getPublicUrl(path);
+
+          finalImageUrl = publicUrl;
+        } catch (storageError) {
+          console.warn('Storage upload error, using preview data URL fallback:', storageError);
+          finalImageUrl = imagePreview || clientData.image_url;
+        }
       }
 
       // Formata o aniversário para salvar como string DD/MM
@@ -130,21 +148,16 @@ export default function AdminEditClient() {
         ? `${String(clientData.birth_day).padStart(2, '0')}/${String(clientData.birth_month).padStart(2, '0')}`
         : null;
 
-      const { error } = await supabase
-        .from('clients')
-        .update({
-          name: clientData.name,
-          phone: clientData.phone,
-          address: clientData.address,
-          birthday: formattedBirthday,
-          is_vip: clientData.is_vip,
-          payment_status: clientData.payment_status,
-          image_url: finalImageUrl,
-          status: 'Ativo' // Ao salvar, o cliente deixa de ser "Pendente"
-        })
-        .eq('id', id);
-
-      if (error) throw error;
+      await api.clients.update(id!, {
+        name: clientData.name,
+        phone: clientData.phone,
+        address: clientData.address,
+        birthday: formattedBirthday || undefined,
+        is_vip: clientData.is_vip,
+        payment_status: clientData.payment_status,
+        image_url: finalImageUrl || undefined,
+        status: 'Ativo'
+      });
       
       toast.success('Cliente atualizado com sucesso!');
       navigate('/admin/clients');
@@ -163,16 +176,10 @@ export default function AdminEditClient() {
     <div className="min-h-screen global-bg text-surface font-body flex flex-col">
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
-      <main className="flex-1 min-w-0 p-0 pb-28">
-        <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 bar-fume border-b border-white/5">
+      <main className={`flex-1 min-w-0 p-0 pb-28 ${isDesktopSidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-[240px]'} transition-all duration-300`}>
+        <header className={`fixed top-0 left-0 right-0 ${isDesktopSidebarCollapsed ? 'lg:left-[76px]' : 'lg:left-[240px]'} z-30 flex items-center justify-between px-6 py-4 bar-fume border-b border-white/5 transition-all duration-300`}>
           <div className="flex items-center gap-4">
             <MenuButton onClick={() => setIsSidebarOpen(true)} />
-            <div className="flex items-center gap-4">
-              <Link to="/admin/clients" className="text-surface/60 hover:text-secondary transition-colors">
-                <span className="material-symbols-outlined">arrow_back</span>
-              </Link>
-              <h2 className="font-headline text-2xl italic">Editar Cliente <span className="text-secondary italic ml-1">VC</span></h2>
-            </div>
           </div>
           <NotificationSino />
         </header>

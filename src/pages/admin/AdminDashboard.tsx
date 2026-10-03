@@ -1,20 +1,22 @@
 import { Link } from 'react-router-dom';
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Calendar, User, ChevronRight, UserMinus, CheckCircle, UserCheck, AlertTriangle, ArrowRight } from 'lucide-react';
+import { Calendar, User, ChevronRight, UserMinus, CheckCircle, UserCheck, AlertTriangle, ArrowRight, Gift, Sparkles } from 'lucide-react';
 import Sidebar from '../../components/Sidebar';
 import BottomNavigation from '../../components/BottomNavigation';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { supabase } from '../../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { api } from '../../services/api';
 import { toast } from 'sonner';
+import { useTheme } from '../../contexts/ThemeContext';
 
 import NotificationSino from '../../components/NotificationSino';
 import PDFPreviewModal from '../../components/PDFPreviewModal';
 import MenuButton from '../../components/MenuButton';
 
 export default function AdminDashboard() {
+  const { isDesktopSidebarCollapsed } = useTheme();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [stats, setStats] = useState({
     totalStock: 0,
@@ -98,7 +100,6 @@ export default function AdminDashboard() {
         recentSales,
         toReceive,
         totalReceived,
-        inadimplentesRes
       ] = await Promise.all([
         api.products.getStats(),
         api.products.getLowStock(2, 3),
@@ -108,8 +109,19 @@ export default function AdminDashboard() {
         api.sales.getRecent(5),
         api.sales.getAccountsReceivable(),
         api.sales.getTotalReceived(),
-        supabase.from('clients').select('id', { count: 'exact', head: true }).eq('payment_status', 'Inadimplente')
       ]);
+
+      let inadimplentesCount = (allClients as any[]).filter(c => c.payment_status === 'Inadimplente').length;
+      if (isSupabaseConfigured) {
+        try {
+          const inadimplentesRes = await supabase.from('clients').select('id', { count: 'exact', head: true }).eq('payment_status', 'Inadimplente');
+          if (typeof inadimplentesRes.count === 'number') {
+            inadimplentesCount = inadimplentesRes.count;
+          }
+        } catch (e) {
+          console.warn('Inadimplentes count error:', e);
+        }
+      }
 
       const incompleteCount = (allClients as any[]).filter(c => c.status === 'Pendente').length;
 
@@ -121,7 +133,7 @@ export default function AdminDashboard() {
         toReceive,
         totalReceived,
         activeClients: (allClients as any[]).filter(c => c.status === 'Ativo').length,
-        inadimplentesCount: (allClients as any[]).filter(c => c.payment_status === 'Inadimplente').length,
+        inadimplentesCount,
         incompleteProfileCount: incompleteCount
       });
       setRecentOrders(recentSales || []);
@@ -130,24 +142,18 @@ export default function AdminDashboard() {
       setUpcomingBirthdays(upcomingBdays);
 
       // Check for today's birthdays and create notifications
-      for (const client of todayBirthdays) {
-        // Check if notification already exists for today
-        const { data: existing } = await supabase
-          .from('notifications')
-          .select('id')
-          .eq('type', 'birthday')
-          .eq('title', `Aniversário: ${client.name}`)
-          .gte('created_at', new Date().toISOString().split('T')[0]);
-
-        if (!existing || existing.length === 0) {
-          await supabase.from('notifications').insert([{
-            type: 'birthday',
-            title: `Aniversário: ${client.name}`,
-            message: `Hoje é o aniversário de ${client.name}! Envie um parabéns especial.`,
-            priority: 'medium',
-            is_read: false,
-            metadata: { clientId: client.id, phone: client.phone }
-          }]);
+      if (todayBirthdays?.length > 0) {
+        for (const client of todayBirthdays) {
+          try {
+            await api.notifications.insert({
+              type: 'aniversario',
+              title: `Aniversário: ${client.name}`,
+              message: `Hoje é o aniversário de ${client.name}! Envie um parabéns especial.`,
+              priority: 'medium'
+            });
+          } catch {
+            // ignore
+          }
         }
       }
 
@@ -259,292 +265,266 @@ export default function AdminDashboard() {
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
       
       {/* Main Content */}
-      <main className="flex-1 min-w-0 p-0 pb-28 ">
-        <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 bar-fume mb-6">
+      <main className={`flex-1 min-w-0 p-0 pb-36 sm:pb-32 lg:pb-16 ${isDesktopSidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-[240px]'} transition-all duration-300`}>
+        <header className={`fixed top-0 left-0 right-0 ${isDesktopSidebarCollapsed ? 'lg:left-[76px]' : 'lg:left-[240px]'} z-30 flex items-center justify-between px-6 py-3 bar-fume transition-all duration-300 border-b border-white/5`}>
           <div className="flex items-center gap-4">
-            <MenuButton onClick={() => setIsSidebarOpen(true)} />
-            <div>
-              <h2 className="font-headline text-xl italic">Dashboard <span className="text-secondary">VC</span></h2>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                <div className={`w-1 h-1 rounded-full ${
-                  dbStatus === 'online' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 
-                  dbStatus === 'offline' ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]' : 
-                  'bg-surface/20 animate-pulse'
-                }`}></div>
-                <span className="text-[7px] uppercase tracking-widest text-surface/60 font-bold">
-                  {dbStatus === 'online' ? 'Online' : dbStatus === 'offline' ? 'Offline' : '...'}
-                </span>
-              </div>
+            <div className="lg:hidden">
+              <MenuButton onClick={() => setIsSidebarOpen(true)} />
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <button 
-              onClick={() => setIsPreviewOpen(true)}
-              className="w-10 h-10 rounded-full bg-primary/40 backdrop-blur-sm border border-secondary/20 flex items-center justify-center text-surface/60 hover:text-secondary transition-all" 
-              title="Gerar Relatório PDF"
-            >
-              <span className="material-symbols-outlined">picture_as_pdf</span>
-            </button>
             <NotificationSino />
           </div>
         </header>
 
-        <div className="px-4 md:px-6 pt-24">
-          <div className="mb-8 flex justify-between items-end">
-            <div>
-              <h2 className="font-headline text-xl italic text-secondary">Dashboard VC</h2>
-              <p className="text-surface/60 text-[11px] uppercase tracking-widest font-medium mt-1">Visão Geral</p>
-            </div>
+        <div className="px-4 sm:px-6 lg:px-8 max-w-[1600px] mx-auto pt-24 pb-8">
+          <div className="mb-6">
+            <h2 className="font-headline text-3xl italic">Dashboard</h2>
+            <p className="text-surface/40 text-[10px] uppercase tracking-[0.2em] font-bold mt-1">
+              Visão geral do negócio e métricas executivas
+            </p>
           </div>
 
-          {/* Stats Grid - Condensed for better density */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          {/* Stats Grid - Ultra Compact & Organized */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
             <motion.div 
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="bg-[#0B111D] p-5 rounded-[20px] border-t border-t-secondary/50 shadow-lg flex flex-col gap-3"
+              whileHover={{ y: -4, scale: 1.01 }}
+              className="bg-[#0F1420]/95 backdrop-blur-2xl p-5 rounded-[24px] border border-secondary/20 shadow-lg shadow-secondary/5 flex flex-col justify-between cursor-pointer transition-all duration-300"
             >
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-full bg-secondary/10 flex items-center justify-center text-secondary">
-                  <span className="material-symbols-outlined text-[16px] font-light">inventory_2</span>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-9 h-9 rounded-xl bg-secondary/10 text-secondary border border-secondary/20 flex items-center justify-center shrink-0 shadow-md">
+                  <span className="material-symbols-outlined text-[18px]">inventory_2</span>
                 </div>
-                <p className="text-surface/80 text-[12px] font-sans font-medium">Estoque Total</p>
+                <p className="text-surface/30 text-[9px] font-black uppercase tracking-widest truncate">Estoque</p>
               </div>
-              <p className="font-sans font-semibold text-2xl text-surface">{stats.totalStock.toLocaleString('pt-BR')}</p>
+              <p className="font-headline italic text-2xl text-white font-black leading-tight">{stats.totalStock.toLocaleString('pt-BR')}</p>
             </motion.div>
             
             <motion.div 
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
+              whileHover={{ y: -4, scale: 1.01 }}
               transition={{ delay: 0.1 }}
-              className="bg-[#0B111D] p-5 rounded-[20px] border-t border-t-blue-400/50 shadow-lg flex flex-col gap-3"
+              className="bg-[#0F1420]/95 backdrop-blur-2xl p-5 rounded-[24px] border border-sky-500/20 shadow-lg shadow-sky-950/10 flex flex-col justify-between cursor-pointer transition-all duration-300"
             >
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-full bg-blue-400/10 flex items-center justify-center text-blue-400">
-                  <span className="material-symbols-outlined text-[16px] font-light">account_balance_wallet</span>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-9 h-9 rounded-xl bg-sky-500/10 text-sky-400 border border-sky-500/20 flex items-center justify-center shrink-0 shadow-md">
+                  <span className="material-symbols-outlined text-[18px]">account_balance_wallet</span>
                 </div>
-                <p className="text-surface/80 text-[12px] font-sans font-medium">Investimento</p>
+                <p className="text-surface/30 text-[9px] font-black uppercase tracking-widest truncate">Investimento</p>
               </div>
               <div className="flex items-baseline gap-1">
-                <span className="text-sm font-sans font-light text-surface/60">R$</span>
-                <p className="font-sans font-semibold text-2xl text-surface">{stats.stockValue.toLocaleString('pt-BR')}</p>
+                <span className="text-xs font-sans font-black text-surface/30 uppercase tracking-wide">R$</span>
+                <p className="font-headline italic text-2xl text-white font-black leading-tight">{stats.stockValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
               </div>
             </motion.div>
 
             <motion.div 
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
+              whileHover={{ y: -4, scale: 1.01 }}
               transition={{ delay: 0.2 }}
-              className="bg-[#0B111D] p-5 rounded-[20px] border-t border-t-emerald-400/50 shadow-lg flex flex-col gap-3"
+              className="bg-[#0F1420]/95 backdrop-blur-2xl p-5 rounded-[24px] border border-emerald-500/20 shadow-lg shadow-emerald-950/10 flex flex-col justify-between cursor-pointer transition-all duration-300"
             >
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-full bg-emerald-400/10 flex items-center justify-center text-emerald-400">
-                  <span className="material-symbols-outlined text-[16px] font-light">payments</span>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center shrink-0 shadow-md">
+                  <span className="material-symbols-outlined text-[18px]">payments</span>
                 </div>
-                <p className="text-surface/80 text-[12px] font-sans font-medium">Total Recebido</p>
+                <p className="text-surface/30 text-[9px] font-black uppercase tracking-widest truncate">Recebido</p>
               </div>
               <div className="flex items-baseline gap-1">
-                <span className="text-sm font-sans font-light text-surface/60">R$</span>
-                <p className="font-sans font-semibold text-2xl text-surface">{stats.totalReceived.toLocaleString('pt-BR')}</p>
+                <span className="text-xs font-sans font-black text-surface/30 uppercase tracking-wide">R$</span>
+                <p className="font-headline italic text-2xl text-white font-black leading-tight">{stats.totalReceived.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
               </div>
             </motion.div>
 
             <motion.div 
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
+              whileHover={{ y: -4, scale: 1.01 }}
               transition={{ delay: 0.3 }}
-              className="bg-[#0B111D] p-5 rounded-[20px] border-t border-t-purple-400/50 shadow-lg flex flex-col gap-3"
+              className="bg-[#0F1420]/95 backdrop-blur-2xl p-5 rounded-[24px] border border-purple-500/20 shadow-lg shadow-purple-950/10 flex flex-col justify-between cursor-pointer transition-all duration-300"
             >
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-full bg-purple-400/10 flex items-center justify-center text-purple-400">
-                  <span className="material-symbols-outlined text-[16px] font-light">pending_actions</span>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-9 h-9 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center justify-center shrink-0 shadow-md">
+                  <span className="material-symbols-outlined text-[18px]">pending_actions</span>
                 </div>
-                <p className="text-surface/80 text-[12px] font-sans font-medium">A Receber</p>
+                <p className="text-surface/30 text-[9px] font-black uppercase tracking-widest truncate">A Receber</p>
               </div>
               <div className="flex items-baseline gap-1">
-                <span className="text-sm font-sans font-light text-surface/60">R$</span>
-                <p className="font-sans font-semibold text-2xl text-surface">{stats.toReceive.toLocaleString('pt-BR')}</p>
+                <span className="text-xs font-sans font-black text-surface/30 uppercase tracking-wide">R$</span>
+                <p className="font-headline italic text-2xl text-white font-black leading-tight">{stats.toReceive.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
               </div>
             </motion.div>
           </div>
 
-          {/* Enhanced Clients Card - Full Width on Mobile, Integrated into Grid on Desktop */}
+          {/* Enhanced Clients Card - Integrated Compact Banner */}
           <motion.div 
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4 }}
-            className="bg-[#0B111D] p-6 rounded-[20px] border-t border-t-secondary/30 shadow-lg mb-8 overflow-hidden relative group"
+            transition={{ delay: 0.35 }}
+            className="bg-[#0B111D] p-3 sm:p-3.5 rounded-[14px] border-t border-t-secondary/30 shadow-md mb-2.5 overflow-hidden relative group"
           >
-            <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
-              <span className="material-symbols-outlined text-8xl text-secondary">group</span>
-            </div>
-            
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 relative z-10">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2.5 relative z-10">
               <div>
-                <h3 className="font-headline text-2xl italic mb-1">Gestão de Clientes</h3>
-                <p className="text-surface/40 text-[10px] uppercase tracking-widest">Base de dados e indicadores de fidelidade</p>
+                <h3 className="font-headline text-lg italic mb-0.5">Gestão de Clientes</h3>
+                <p className="text-surface/40 text-[8px] uppercase tracking-widest font-bold">Base de dados e indicadores</p>
               </div>
               
-              <div className="flex flex-row justify-around items-center w-full md:w-auto gap-4 md:gap-8">
+              <div className="flex flex-row justify-around items-center w-full md:w-auto gap-4 md:gap-6">
                 <div className="flex flex-col items-center">
-                  <div className="flex items-center gap-1 mb-1">
-                    <UserCheck className="w-3 h-3 text-[#4CAF50] opacity-50" />
-                    <p className="text-surface/60 text-[10px] uppercase tracking-widest font-sans">Ativos</p>
+                  <div className="flex items-center gap-1">
+                    <UserCheck className="w-3 h-3 text-[#4CAF50] opacity-70" />
+                    <p className="text-surface/60 text-[8px] uppercase tracking-widest font-bold">Ativos</p>
                   </div>
-                  <p className="font-sans font-semibold text-3xl text-[#4CAF50]">{stats.activeClients}</p>
+                  <p className="font-sans font-bold text-lg text-[#4CAF50]">{stats.activeClients}</p>
                 </div>
                 <div className="flex flex-col items-center">
-                  <div className="flex items-center gap-1 mb-1">
-                    <AlertTriangle className="w-3 h-3 text-rose-400 opacity-50" />
-                    <p className="text-surface/60 text-[10px] uppercase tracking-widest font-sans">Inadimplentes</p>
+                  <div className="flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3 text-rose-400 opacity-70" />
+                    <p className="text-surface/60 text-[8px] uppercase tracking-widest font-bold">Inadimplentes</p>
                   </div>
-                  <p className="font-sans font-semibold text-3xl text-rose-400">{stats.inadimplentesCount}</p>
+                  <p className="font-sans font-bold text-lg text-rose-400">{stats.inadimplentesCount}</p>
                 </div>
                 <div className="flex flex-col items-center">
-                  <div className="flex items-center gap-1 mb-1">
-                    <UserMinus className="w-3 h-3 text-orange-400 opacity-50" />
-                    <p className="text-surface/60 text-[10px] uppercase tracking-widest font-sans">Sem Cadastro</p>
+                  <div className="flex items-center gap-1">
+                    <UserMinus className="w-3 h-3 text-orange-400 opacity-70" />
+                    <p className="text-surface/60 text-[8px] uppercase tracking-widest font-bold">Sem Cadastro</p>
                   </div>
-                  <p className="font-sans font-semibold text-3xl text-orange-400">{stats.incompleteProfileCount}</p>
+                  <p className="font-sans font-bold text-lg text-orange-400">{stats.incompleteProfileCount}</p>
                 </div>
               </div>
 
               <Link 
                 to="/admin/clients"
-                className="w-full md:w-auto px-6 py-3 rounded-2xl bg-[#D4AF37] text-[#0A1220] font-bold uppercase tracking-widest text-xs flex items-center justify-between gap-4 hover:bg-[#F3E5AB] transition-all shadow-lg shadow-[#D4AF37]/20"
+                className="w-full md:w-auto px-4 py-2 rounded-lg bg-[#D4AF37] text-[#0A1220] font-bold uppercase tracking-widest text-[9px] flex items-center justify-center gap-1.5 hover:bg-[#F3E5AB] transition-all shadow-md shadow-[#D4AF37]/20"
               >
                 <span>Gerenciar Clientes</span>
-                <ArrowRight className="w-4 h-4" />
+                <ArrowRight className="w-3 h-3" />
               </Link>
             </div>
           </motion.div>
 
-        {/* Recent Orders, Low Stock & Birthdays */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 glass-card rounded-2xl p-6">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="font-headline text-xl italic">Vendas Recentes</h3>
-              <Link to="/admin/sales" className="text-secondary text-xs uppercase tracking-widest hover:underline">Ver Todas</Link>
-            </div>
+        {/* 2-Column Responsive Grid Layout (Vendas, Estoque & Mimos) */}
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-2.5">
+          <div className="xl:col-span-2 space-y-2.5">
             
-            {/* Carousel View */}
-            <div className="flex overflow-x-auto gap-4 snap-x snap-mandatory hide-scrollbar pb-4" ref={carouselRef}>
-              {recentOrders.length === 0 ? (
-                <p className="text-center text-surface/60 text-xs py-10 italic w-full">Nenhuma venda registrada</p>
-              ) : (
-                <>
-                  {recentOrders.map((order) => (
-                    <div key={order.id} className="min-w-[280px] w-[280px] h-[160px] bg-[#161B22] rounded-2xl p-4 flex flex-col justify-between shadow-lg snap-start border border-white/5">
-                      {/* Header */}
-                      <div className="flex justify-between items-center">
-                        <span className="font-medium text-white truncate pr-2">{order.clients?.name || 'Consumidor Final'}</span>
-                        <span className={`px-2 py-0.5 rounded-md text-[8px] uppercase tracking-widest font-bold whitespace-nowrap ${
-                          order.status === 'pago' 
-                            ? 'bg-emerald-500/10 text-emerald-400' 
-                            : 'bg-amber-500/10 text-amber-400'
-                        }`}>
-                          {order.status === 'pago' ? 'PAGO' : 'AGUARDANDO...'}
-                        </span>
-                      </div>
-                      
-                      {/* Center - Product */}
-                      <div className="flex items-center gap-3 my-auto">
-                        {order.sale_items?.[0]?.products?.image_url ? (
-                          <img src={order.sale_items[0].products.image_url} alt="Produto" className="w-12 h-12 rounded-full object-cover border border-[#D4AF37]/20" />
-                        ) : (
-                          <div className="w-12 h-12 rounded-full bg-[#D4AF37]/10 flex items-center justify-center border border-[#D4AF37]/20">
-                            <span className="text-[10px] font-bold text-[#D4AF37]">VC</span>
-                          </div>
-                        )}
-                        <div className="flex-1 flex flex-col justify-center overflow-hidden">
-                          {order.sale_items?.[0] ? (
-                            <span className="text-xs text-gray-300 truncate">
-                              <span className="font-bold text-[#D4AF37]">{order.sale_items[0].quantity}x</span> {order.sale_items[0].products?.name || 'Produto Excluído'}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-gray-500 italic">Sem itens</span>
-                          )}
-                          {order.sale_items?.length > 1 && (
-                            <span className="text-[10px] text-gray-500 mt-0.5">+ {order.sale_items.length - 1} outro(s) item(ns)</span>
-                          )}
-                        </div>
-                      </div>
-                      
-                      {/* Footer */}
-                      <div className="flex justify-between items-end">
-                        <div className="flex flex-col">
-                          <span className="text-[10px] text-gray-500">{new Date(order.created_at || order.sale_date).toLocaleDateString('pt-BR')}</span>
-                          <span className="text-[10px] text-gray-500">{new Date(order.created_at || order.sale_date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
-                        </div>
-                        <span className="font-bold text-[#FFD700] text-sm">
-                          R$ {order.total_amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                  
-                  {/* "Ver Todas" Card at the end */}
-                  <Link to="/admin/sales" className="min-w-[280px] w-[280px] h-[160px] bg-[#161B22]/50 rounded-2xl p-4 flex flex-col items-center justify-center shadow-lg snap-start border border-dashed border-[#D4AF37]/30 hover:bg-[#161B22] transition-colors group">
-                    <div className="w-12 h-12 rounded-full bg-[#D4AF37]/10 flex items-center justify-center mb-3 group-hover:bg-[#D4AF37]/20 transition-colors">
-                      <ChevronRight className="text-[#D4AF37]" />
-                    </div>
-                    <span className="text-[#D4AF37] font-bold text-sm uppercase tracking-widest">Ver Todas</span>
-                  </Link>
-                </>
-              )}
-            </div>
-          </div>
-
-          <div className="space-y-6">
-            <div className="glass-card rounded-2xl p-6">
-              <h3 className="font-headline text-xl italic mb-6">Estoque Baixo</h3>
+            {/* Vendas Recentes */}
+            <div className="glass-card rounded-[14px] p-3">
+              <div className="flex justify-between items-center mb-2">
+                <h3 className="font-headline text-base italic">Vendas Recentes</h3>
+                <Link to="/admin/sales" className="text-secondary text-[9px] uppercase tracking-widest font-bold hover:underline">Ver Todas</Link>
+              </div>
               
-              <div className="flex overflow-x-auto gap-4 snap-x snap-mandatory hide-scrollbar pb-4" ref={stockCarouselRef}>
+              <div className="flex overflow-x-auto gap-2.5 snap-x snap-mandatory hide-scrollbar pb-1" ref={carouselRef}>
+                {recentOrders.length === 0 ? (
+                  <p className="text-center text-surface/60 text-xs py-4 italic w-full">Nenhuma venda registrada</p>
+                ) : (
+                  <>
+                    {recentOrders.map((order) => (
+                      <div key={order.id} className="min-w-[230px] w-[230px] h-[115px] bg-[#161B22] rounded-[12px] p-2.5 flex flex-col justify-between shadow-md snap-start border border-white/5">
+                        <div className="flex justify-between items-center">
+                          <span className="font-medium text-white text-xs truncate pr-2">{order.clients?.name || 'Consumidor Final'}</span>
+                          <span className={`px-2 py-0.5 rounded-md text-[8px] uppercase tracking-widest font-bold whitespace-nowrap ${
+                            order.status === 'pago' 
+                              ? 'bg-emerald-500/10 text-emerald-400' 
+                              : 'bg-amber-500/10 text-amber-400'
+                          }`}>
+                            {order.status === 'pago' ? 'PAGO' : 'AGUARDANDO...'}
+                          </span>
+                        </div>
+                        
+                        <div className="flex items-center gap-2.5 my-auto">
+                          {order.sale_items?.[0]?.products?.image_url ? (
+                            <img src={order.sale_items[0].products.image_url} alt="Produto" className="w-9 h-9 rounded-full object-cover border border-[#D4AF37]/20 shrink-0" />
+                          ) : (
+                            <div className="w-9 h-9 rounded-full bg-[#D4AF37]/10 flex items-center justify-center border border-[#D4AF37]/20 shrink-0">
+                              <span className="text-[9px] font-bold text-[#D4AF37]">VC</span>
+                            </div>
+                          )}
+                          <div className="flex-1 flex flex-col justify-center overflow-hidden">
+                            {order.sale_items?.[0] ? (
+                              <span className="text-[11px] text-gray-300 truncate">
+                                <span className="font-bold text-[#D4AF37]">{order.sale_items[0].quantity}x</span> {order.sale_items[0].products?.name || 'Produto Excluído'}
+                              </span>
+                            ) : (
+                              <span className="text-[11px] text-gray-500 italic">Sem itens</span>
+                            )}
+                            {order.sale_items?.length > 1 && (
+                              <span className="text-[9px] text-gray-500">+ {order.sale_items.length - 1} outro(s)</span>
+                            )}
+                          </div>
+                        </div>
+                        
+                        <div className="flex justify-between items-end border-t border-white/5 pt-1.5">
+                          <span className="text-[9px] text-gray-500">{new Date(order.created_at || order.sale_date).toLocaleDateString('pt-BR')}</span>
+                          <span className="font-bold text-[#FFD700] text-xs">
+                            R$ {order.total_amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                    
+                    <Link to="/admin/sales" className="min-w-[160px] w-[160px] h-[115px] bg-[#161B22]/50 rounded-[12px] p-2.5 flex flex-col items-center justify-center shadow-md snap-start border border-dashed border-[#D4AF37]/30 hover:bg-[#161B22] transition-colors group">
+                      <div className="w-8 h-8 rounded-full bg-[#D4AF37]/10 flex items-center justify-center mb-1.5 group-hover:bg-[#D4AF37]/20 transition-colors">
+                        <ChevronRight className="text-[#D4AF37] w-4 h-4" />
+                      </div>
+                      <span className="text-[#D4AF37] font-bold text-[10px] uppercase tracking-widest">Ver Todas</span>
+                    </Link>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Estoque Baixo */}
+            <div className="glass-card rounded-[14px] p-3">
+              <div className="flex justify-between items-center mb-2">
+                <h3 className="font-headline text-base italic">Estoque Baixo</h3>
+                <Link to="/admin/inventory" className="text-secondary text-[9px] uppercase tracking-widest font-bold hover:underline">Ver Completo</Link>
+              </div>
+              
+              <div className="flex overflow-x-auto gap-2.5 snap-x snap-mandatory hide-scrollbar pb-1" ref={stockCarouselRef}>
                 {lowStockItems.length === 0 ? (
-                  <p className="text-center text-surface/60 text-xs py-10 italic w-full">Estoque saudável</p>
+                  <p className="text-center text-surface/60 text-xs py-4 italic w-full">Estoque saudável</p>
                 ) : (
                   <>
                     {lowStockItems.map((item, i) => {
-                      // Simulação de ritmo de saída baseada no ID do produto para ser determinística
-                      // Em um cenário real, isso seria calculado com base na média de vendas diárias
-                      const pseudoRandomRate = (item.id.charCodeAt(0) % 3) + 1; // 1 a 3 itens por dia
+                      const pseudoRandomRate = (item.id.charCodeAt(0) % 3) + 1;
                       const depletionDays = Math.max(0, Math.ceil(item.stock / pseudoRandomRate));
                       const isZeroStock = item.stock === 0;
                       
                       return (
                         <div 
                           key={i} 
-                          className={`min-w-[280px] w-[280px] h-[160px] bg-[#161B22] rounded-2xl p-4 flex flex-col justify-between shadow-lg snap-start border relative ${
+                          className={`min-w-[230px] w-[230px] h-[115px] bg-[#161B22] rounded-[12px] p-2.5 flex flex-col justify-between shadow-md snap-start border relative ${
                             isZeroStock ? 'border-rose-500/50 animate-pulse' : 'border-white/5'
                           }`}
                         >
-                          {/* Badge de Quantidade */}
-                          <div className="absolute top-4 right-4">
-                            <span className={`px-2 py-1 rounded-md text-[9px] font-bold uppercase tracking-widest ${
+                          <div className="flex items-center justify-between">
+                            <span className="text-[9px] text-gray-400 uppercase tracking-wider truncate pr-2">{item.brand || 'Sem Categoria'}</span>
+                            <span className={`px-1.5 py-0.5 rounded-md text-[8px] font-bold uppercase tracking-widest shrink-0 ${
                               isZeroStock ? 'bg-rose-500/20 text-rose-400' : 'bg-amber-500/20 text-amber-400'
                             }`}>
-                              {item.stock} un RESTANTE
+                              {item.stock} RESTANTE
                             </span>
                           </div>
 
-                          <div className="flex gap-4 h-full pt-6 items-center">
-                            {/* Imagem do Produto */}
+                          <div className="flex gap-2.5 items-center my-auto">
                             <img 
                               src={item.image_url || 'https://picsum.photos/seed/product/100/100'} 
                               alt={item.name} 
-                              className={`w-20 h-20 rounded-xl object-cover shadow-md border border-white/10 ${isZeroStock ? 'opacity-50 grayscale' : ''}`} 
+                              className={`w-10 h-10 rounded-lg object-cover border border-white/10 shrink-0 ${isZeroStock ? 'opacity-50 grayscale' : ''}`} 
                               referrerPolicy="no-referrer" 
                             />
                             
-                            {/* Informações */}
-                            <div className="flex flex-col justify-center flex-1">
-                              <p className="text-sm font-bold text-white line-clamp-2 leading-tight mb-1">{item.name}</p>
-                              <p className="text-[10px] text-gray-400 uppercase tracking-widest mb-3">{item.brand || 'Sem Categoria'}</p>
-                              
+                            <div className="flex flex-col justify-center overflow-hidden">
+                              <p className="text-xs font-bold text-white truncate leading-tight mb-0.5">{item.name}</p>
                               {isZeroStock ? (
-                                <p className="text-xs font-bold text-rose-500">ESGOTADO! Compre agora</p>
+                                <p className="text-[9px] font-bold text-rose-500">ESGOTADO!</p>
                               ) : (
-                                <p className={`text-xs font-medium ${depletionDays < 3 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                                <p className={`text-[9px] font-medium ${depletionDays < 3 ? 'text-rose-400' : 'text-emerald-400'}`}>
                                   Esgota em {depletionDays} dia{depletionDays !== 1 ? 's' : ''}
                                 </p>
                               )}
@@ -556,72 +536,71 @@ export default function AdminDashboard() {
                   </>
                 )}
               </div>
-
-              <Link 
-                to="/admin/inventory" 
-                className="flex items-center justify-center gap-2 w-max mx-auto px-6 py-2 rounded-full border border-[#D4AF37]/50 text-[#D4AF37] text-[10px] uppercase tracking-widest font-bold hover:bg-[#D4AF37]/10 transition-all mt-2 group"
-              >
-                Ver Estoque Completo
-                <ChevronRight size={14} className="group-hover:translate-x-1 transition-transform" />
-              </Link>
             </div>
 
-            <div className={`bg-[#0A1220] rounded-[24px] p-6 relative overflow-hidden transition-all duration-500 shadow-[0_0_15px_rgba(212,175,55,0.15)] border border-[#D4AF37]/20`}>
-              <h3 className="font-headline text-xl italic text-white mb-6 text-left">Fidelidade & Mimos</h3>
-              <div className="space-y-4 relative z-10">
+          </div>
+
+          {/* Fidelidade & Mimos Side Card */}
+          <div className="xl:col-span-1">
+            <div className="bg-[#0F1420]/95 backdrop-blur-2xl rounded-[18px] sm:rounded-[22px] p-4 sm:p-5 flex flex-col justify-between h-full shadow-lg shadow-secondary/5 border border-secondary/20 min-h-[220px] transition-all">
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-3 border-b border-white/5 pb-2.5">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-xl bg-secondary/15 text-secondary border border-secondary/25 flex items-center justify-center shadow-md shrink-0">
+                      <Gift className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="font-headline text-base sm:text-lg italic text-white font-bold leading-tight truncate">Fidelidade & Mimos</h3>
+                      <p className="text-[8px] sm:text-[9px] uppercase tracking-widest text-surface/40 font-semibold truncate">Aniversários & Cupons</p>
+                    </div>
+                  </div>
+                  {(birthdayClients.length > 0 || upcomingBirthdays.length > 0) && (
+                    <span className="px-2 py-0.5 rounded-full bg-secondary/10 border border-secondary/20 text-secondary text-[9px] font-bold shrink-0">
+                      {birthdayClients.length + upcomingBirthdays.length} {birthdayClients.length + upcomingBirthdays.length === 1 ? 'cliente' : 'clientes'}
+                    </span>
+                  )}
+                </div>
+                
                 {birthdayClients.length === 0 && upcomingBirthdays.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-8 text-center">
-                    <span className="material-symbols-outlined text-6xl text-white/5 absolute opacity-20">featured_seasonal_and_gifts</span>
-                    <p className="text-gray-400 text-sm italic relative z-10">Nenhum aniversariante hoje.<br/>Que tal criar uma promoção relâmpago?</p>
+                  <div className="flex flex-col items-center justify-center py-4 text-center">
+                    <div className="w-11 h-11 rounded-2xl bg-secondary/10 border border-secondary/15 flex items-center justify-center text-secondary/40 mb-2">
+                      <Gift className="w-5 h-5" />
+                    </div>
+                    <p className="text-white font-headline text-sm italic font-bold mb-0.5">Nenhum aniversariante hoje</p>
+                    <p className="text-surface/50 text-[11px] leading-relaxed">Crie mimos e cupons para fidelizar suas clientes.</p>
                   </div>
                 ) : (
-                  <div className="flex flex-col items-center justify-center py-4 text-center">
+                  <div className="flex flex-col items-center justify-center py-2 text-center">
                     {birthdayClients.length === 0 && upcomingBirthdays.length > 0 ? (
                       <>
-                        <p className="text-[#D4AF37] font-headline text-xl mb-1">Prepare os mimos!</p>
-                        <p className="text-gray-300 text-sm mb-6">{upcomingBirthdays.length} {upcomingBirthdays.length === 1 ? 'cliente faz' : 'clientes fazem'} aniversário esta semana</p>
+                        <p className="text-[#D4AF37] font-headline text-base font-bold mb-0.5">Prepare os mimos!</p>
+                        <p className="text-surface/70 text-xs mb-3">{upcomingBirthdays.length} {upcomingBirthdays.length === 1 ? 'cliente faz' : 'clientes fazem'} aniversário esta semana</p>
                       </>
                     ) : (
                       <>
-                        <p className="text-[#D4AF37] font-headline text-xl mb-1">{birthdayClients.length} {birthdayClients.length === 1 ? 'cliente faz' : 'clientes fazem'} aniversário hoje!</p>
+                        <p className="text-[#D4AF37] font-headline text-base font-bold mb-0.5">{birthdayClients.length} {birthdayClients.length === 1 ? 'cliente faz' : 'clientes fazem'} aniversário hoje!</p>
                         {upcomingBirthdays.length > 0 && (
-                          <p className="text-gray-300 text-sm mb-6">{upcomingBirthdays.length} {upcomingBirthdays.length === 1 ? 'aniversariante' : 'aniversariantes'} nos próximos 7 dias</p>
+                          <p className="text-surface/70 text-xs mb-3">{upcomingBirthdays.length} {upcomingBirthdays.length === 1 ? 'aniversariante' : 'aniversariantes'} nos próximos 7 dias</p>
                         )}
                       </>
                     )}
 
                     {(() => {
                       const allBirthdays = [...birthdayClients, ...upcomingBirthdays];
-                      if (allBirthdays.length === 1) {
-                        const client = allBirthdays[0];
-                        return (
-                          <div className="flex flex-col items-center">
-                            <div className="w-[50px] h-[50px] rounded-full border-[1.5px] border-[#D4AF37] bg-[#151E3F] flex items-center justify-center shadow-lg relative z-10 mb-2">
-                              {client.photo_url || client.image_url ? (
-                                <img src={client.photo_url || client.image_url} alt={client.name} className="w-full h-full rounded-full object-cover" referrerPolicy="no-referrer" />
-                              ) : (
-                                <span className="text-[#D4AF37] font-headline text-xl">{client.name.charAt(0).toUpperCase()}</span>
-                              )}
-                            </div>
-                            <p className="text-xs text-gray-400 uppercase tracking-widest">{client.name}</p>
-                          </div>
-                        );
-                      }
-
                       return (
-                        <div className="flex justify-center -space-x-4 mb-2 hover:scale-105 transition-transform cursor-default">
-                          {allBirthdays.slice(0, 3).map((client, i) => (
-                            <div key={i} className="w-[50px] h-[50px] rounded-full border-[1.5px] border-[#D4AF37] bg-[#151E3F] flex items-center justify-center shadow-lg relative z-10" style={{ zIndex: 10 - i }}>
+                        <div className="flex justify-center -space-x-2.5 mb-2">
+                          {allBirthdays.slice(0, 4).map((client, i) => (
+                            <div key={i} className="w-9 h-9 rounded-full border border-[#D4AF37] bg-[#151E3F] flex items-center justify-center shadow-md relative" style={{ zIndex: 10 - i }}>
                               {client.photo_url || client.image_url ? (
                                 <img src={client.photo_url || client.image_url} alt={client.name} className="w-full h-full rounded-full object-cover" referrerPolicy="no-referrer" />
                               ) : (
-                                <span className="text-[#D4AF37] font-headline text-xl">{client.name.charAt(0).toUpperCase()}</span>
+                                <span className="text-[#D4AF37] font-headline text-xs font-bold">{client.name.charAt(0).toUpperCase()}</span>
                               )}
                             </div>
                           ))}
-                          {allBirthdays.length > 3 && (
-                            <div className="w-[50px] h-[50px] rounded-full border-[1.5px] border-[#D4AF37] bg-[#151E3F] flex items-center justify-center shadow-lg relative z-10" style={{ zIndex: 0 }}>
-                              <span className="text-[#D4AF37] font-bold text-sm">+{allBirthdays.length - 3}</span>
+                          {allBirthdays.length > 4 && (
+                            <div className="w-9 h-9 rounded-full border border-[#D4AF37] bg-[#151E3F] flex items-center justify-center shadow-md relative" style={{ zIndex: 0 }}>
+                              <span className="text-[#D4AF37] font-bold text-xs">+{allBirthdays.length - 4}</span>
                             </div>
                           )}
                         </div>
@@ -629,14 +608,16 @@ export default function AdminDashboard() {
                     })()}
                   </div>
                 )}
-                <Link 
-                  to="/admin/mimos" 
-                  state={{ upcomingBirthdays: upcomingBirthdays, todayBirthdays: birthdayClients }}
-                  className="block text-center py-3.5 rounded-xl border border-[#D4AF37] text-[#D4AF37] text-xs uppercase tracking-widest font-sans font-bold hover:bg-[#D4AF37]/10 transition-colors mt-6 relative z-10"
-                >
-                  {birthdayClients.length > 0 || upcomingBirthdays.length > 0 ? 'PRESENTEAR CLIENTES' : 'GERAR CUPONS'}
-                </Link>
               </div>
+
+              <Link 
+                to="/admin/mimos" 
+                state={{ upcomingBirthdays: upcomingBirthdays, todayBirthdays: birthdayClients }}
+                className="w-full h-10 sm:h-11 rounded-xl bg-secondary text-primary font-black uppercase tracking-wider text-[11px] sm:text-xs flex items-center justify-center gap-2 hover:bg-white transition-all shadow-md active:scale-98 mt-2 cursor-pointer"
+              >
+                <Gift className="w-4 h-4 shrink-0" />
+                <span>{birthdayClients.length > 0 || upcomingBirthdays.length > 0 ? 'Presentear Clientes' : 'Gerar Cupons & Mimos'}</span>
+              </Link>
             </div>
           </div>
         </div>

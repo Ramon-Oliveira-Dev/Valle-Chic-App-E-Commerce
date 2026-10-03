@@ -8,8 +8,10 @@ import NotificationModal from '../../components/NotificationModal';
 import NotificationSino from '../../components/NotificationSino';
 import MenuButton from '../../components/MenuButton';
 import { formatCurrency, maskCurrency, parseCurrency } from '../../lib/utils';
+import { useTheme } from '../../contexts/ThemeContext';
 
 export default function AdminEditProduct() {
+  const { isDesktopSidebarCollapsed } = useTheme();
   const { id } = useParams();
   const navigate = useNavigate();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -268,18 +270,10 @@ export default function AdminEditProduct() {
     <div className="min-h-screen global-bg text-surface font-body flex flex-col">
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
-      <main className="flex-1 min-w-0 p-0 pb-28 ">
-        <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 bar-fume mb-10">
+      <main className={`flex-1 min-w-0 p-0 pb-28 ${isDesktopSidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-[240px]'} transition-all duration-300`}>
+        <header className={`fixed top-0 left-0 right-0 ${isDesktopSidebarCollapsed ? 'lg:left-[76px]' : 'lg:left-[240px]'} z-30 flex items-center justify-between px-6 py-4 bar-fume mb-10 transition-all duration-300 border-b border-white/5`}>
           <div className="flex items-center gap-4">
             <MenuButton onClick={() => setIsSidebarOpen(true)} />
-            <div>
-              <div className="flex items-center gap-4">
-                <Link to="/admin/inventory" className="text-surface/60 hover:text-secondary transition-colors">
-                  <span className="material-symbols-outlined">arrow_back</span>
-                </Link>
-                <h2 className="font-headline text-2xl italic">Editar Produto <span className="text-secondary">VC</span></h2>
-              </div>
-            </div>
           </div>
           <div className="flex items-center gap-4">
             <NotificationSino />
@@ -292,9 +286,9 @@ export default function AdminEditProduct() {
             <p className="text-surface/60 text-sm mt-1">Atualize as informações do produto ID: {id}</p>
           </div>
 
-        <div className="max-w-4xl grid grid-cols-1 lg:grid-cols-3 gap-8 pb-10">
+        <div className="max-w-7xl grid grid-cols-1 lg:grid-cols-12 gap-6 pb-12">
           {/* Form Column */}
-          <div className="lg:col-span-2 glass-card rounded-2xl p-5 sm:p-8">
+          <div className="lg:col-span-7 glass-card rounded-2xl p-5 sm:p-6">
             <form className="space-y-8" onSubmit={(e) => { e.preventDefault(); handleSave(); }}>
               <section>
                 <h3 className="text-secondary text-sm font-bold uppercase tracking-widest mb-6 border-b border-secondary/20 pb-2">Detalhes da Peça</h3>
@@ -333,14 +327,14 @@ export default function AdminEditProduct() {
                     <div className="space-y-2">
                       <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Categoria</label>
                       <select 
-                        className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors appearance-none"
+                        className="w-full bg-primary/80 backdrop-blur-sm border border-secondary/20 rounded-xl py-3 px-4 text-surface font-semibold focus:outline-none focus:border-secondary transition-colors cursor-pointer hover:border-secondary/40 shadow-inner"
                         value={productData.category}
                         onChange={(e) => setProductData({...productData, category: e.target.value})}
                       >
-                        <option value="bolsas">Bolsas</option>
-                        <option value="maletas">Maletas</option>
-                        <option value="carteiras">Carteiras</option>
-                        <option value="acessorios">Acessórios</option>
+                        <option value="bolsas" className="bg-[#0B111D] text-surface">Bolsas</option>
+                        <option value="maletas" className="bg-[#0B111D] text-surface">Maletas</option>
+                        <option value="carteiras" className="bg-[#0B111D] text-surface">Carteiras</option>
+                        <option value="acessorios" className="bg-[#0B111D] text-surface">Acessórios</option>
                       </select>
                     </div>
                     <div className="space-y-2">
@@ -369,24 +363,34 @@ export default function AdminEditProduct() {
                 <h3 className="text-secondary text-sm font-bold uppercase tracking-widest mb-6 border-b border-secondary/20 pb-2">Precificação & Estoque</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
-                    <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Valor Pago (R$)</label>
-                    <input 
-                      type="text" 
-                      inputMode="decimal"
-                      className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors" 
-                      value={costPrice}
-                      onChange={(e) => setCostPrice(maskCurrency(e.target.value))}
-                    />
+                    <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60 font-bold">Valor Pago (Custo)</label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                        <span className="text-secondary font-bold text-sm">R$</span>
+                      </div>
+                      <input 
+                        type="text" 
+                        inputMode="decimal"
+                        className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 pl-10 pr-4 text-surface focus:outline-none focus:border-secondary focus:ring-1 focus:ring-secondary/50 transition-colors" 
+                        value={costPrice}
+                        onChange={(e) => setCostPrice(maskCurrency(e.target.value))}
+                      />
+                    </div>
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Preço de Venda (R$)</label>
-                    <input 
-                      type="text" 
-                      inputMode="decimal"
-                      className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors font-bold text-secondary" 
-                      value={salePrice}
-                      onChange={(e) => setSalePrice(maskCurrency(e.target.value))}
-                    />
+                    <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60 font-bold">Preço de Venda</label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                        <span className="text-secondary font-bold text-sm">R$</span>
+                      </div>
+                      <input 
+                        type="text" 
+                        inputMode="decimal"
+                        className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/25 rounded-lg py-3 pl-10 pr-4 text-surface focus:outline-none focus:border-secondary focus:ring-1 focus:ring-secondary/50 transition-colors font-black text-secondary" 
+                        value={salePrice}
+                        onChange={(e) => setSalePrice(maskCurrency(e.target.value))}
+                      />
+                    </div>
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">% de Lucro</label>
@@ -394,25 +398,6 @@ export default function AdminEditProduct() {
                       {profitPercentage}%
                     </div>
                     <p className="text-[9px] text-surface/60 italic">Calculado automaticamente</p>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Quantidade em Estoque</label>
-                    <input 
-                      type="number" 
-                      inputMode="numeric"
-                      className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors" 
-                      value={stock}
-                      onChange={(e) => {
-                        const newStock = e.target.value;
-                        setStock(newStock);
-                        setProductData({
-                          ...productData, 
-                          stock: Number(newStock),
-                          individual_ids: syncIndividualIds(Number(newStock))
-                        });
-                      }}
-                      min="0" 
-                    />
                   </div>
 
                   <div className="md:col-span-2 space-y-4">
@@ -551,7 +536,7 @@ export default function AdminEditProduct() {
           </div>
 
           {/* Image Upload Column */}
-          <div className="space-y-6">
+          <div className="lg:col-span-5 space-y-6">
             <div className="glass-card rounded-2xl p-6">
               <h3 className="text-secondary text-sm font-bold uppercase tracking-widest mb-4 border-b border-secondary/20 pb-2">Imagens</h3>
               

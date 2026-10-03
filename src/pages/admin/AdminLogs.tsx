@@ -2,10 +2,13 @@ import { useState, useEffect } from 'react';
 import Sidebar from '../../components/Sidebar';
 import BottomNavigation from '../../components/BottomNavigation';
 import MenuButton from '../../components/MenuButton';
-import { supabase } from '../../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { api } from '../../services/api';
 import SettingsData from '../../components/SettingsData';
+import { useTheme } from '../../contexts/ThemeContext';
 
 export default function AdminLogs() {
+  const { isDesktopSidebarCollapsed } = useTheme();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [logs, setLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -17,16 +20,10 @@ export default function AdminLogs() {
   const fetchLogs = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('system_logs')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(50);
-
-      if (error) throw error;
+      const data = await api.logs.getAll();
       setLogs(data || []);
-    } catch (error) {
-      console.error('Error fetching logs:', error);
+    } catch {
+      setLogs([]);
     } finally {
       setLoading(false);
     }
@@ -36,18 +33,28 @@ export default function AdminLogs() {
     <div className="min-h-screen global-bg text-surface font-body flex flex-col">
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
       
-      <main className="flex-1 min-w-0 p-0 pb-28 ">
-        <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 bar-fume mb-6">
+      <main className={`flex-1 min-w-0 p-0 pb-28 ${isDesktopSidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-[240px]'} transition-all duration-300`}>
+        <header className={`fixed top-0 left-0 right-0 ${isDesktopSidebarCollapsed ? 'lg:left-[76px]' : 'lg:left-[240px]'} z-30 flex items-center justify-between px-6 py-4 bar-fume mb-6 transition-all duration-300`}>
           <div className="flex items-center gap-4">
-            <MenuButton onClick={() => setIsSidebarOpen(true)} />
-            <h2 className="font-headline text-2xl italic">Logs de <span className="text-secondary">Sistema</span></h2>
+            <div className="lg:hidden">
+              <MenuButton onClick={() => setIsSidebarOpen(true)} />
+            </div>
           </div>
           <button onClick={fetchLogs} className="text-secondary hover:opacity-80">
             <span className="material-symbols-outlined">refresh</span>
           </button>
         </header>
 
-        <div className="px-5 md:px-10 pt-24">
+        <div className="px-6 lg:px-10 max-w-[1600px] mx-auto pt-24">
+          <div className="mb-8">
+            <div className="flex items-center gap-2">
+              <h2 className="font-headline text-3xl italic tracking-tight">Logs <span className="text-secondary">VC</span></h2>
+            </div>
+            <p className="text-surface/40 text-[10px] uppercase tracking-[0.2em] font-bold mt-1">
+              Monitoramento de atividades e sincronização do sistema
+            </p>
+          </div>
+
           {/* Painel de Controle de Dados */}
           <div className="mb-10">
             <SettingsData onActionComplete={fetchLogs} />
@@ -55,7 +62,7 @@ export default function AdminLogs() {
 
           <div className="glass-card rounded-2xl overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
+              <table className="w-full text-left border-collapse min-w-[650px]">
                 <thead>
                   <tr className="border-b border-secondary/10 text-surface/60 text-[10px] uppercase tracking-widest">
                     <th className="p-4 font-normal">Data</th>

@@ -6,8 +6,10 @@ import BottomNavigation from '../components/BottomNavigation';
 import Sidebar from '../components/Sidebar';
 import ProductImage from '../components/ProductImage';
 import { productToCartItem } from '../lib/productMetadata';
+import { useTheme } from '../contexts/ThemeContext';
 
 export default function Menu() {
+  const { isDesktopSidebarCollapsed } = useTheme();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [kits, setKits] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -38,21 +40,19 @@ export default function Menu() {
   };
 
   return (
-    <div className="global-bg text-surface font-body min-h-screen">
+    <div className={`global-bg text-surface font-body min-h-screen ${isDesktopSidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-[240px]'} transition-all duration-300`}>
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
       
       {/* TopAppBar */}
-      <header className="fixed top-0 left-0 right-0  z-50 flex items-center justify-between px-6 py-4 bar-fume">
-        <button 
-          onClick={() => setIsSidebarOpen(true)}
-          className="w-10 h-10 rounded-full border border-secondary/20 overflow-hidden flex items-center justify-center bg-primary active:scale-90 transition-transform"
-        >
-          <span className="material-symbols-outlined text-secondary text-xl">menu</span>
-        </button>
-        <h1 className="font-headline text-2xl font-bold tracking-tighter text-stone-100 flex items-center gap-0.5">
-          <span className="material-symbols-outlined text-xl text-secondary" style={{ fontVariationSettings: "'FILL' 1" }}>favorite</span>
-          <span className="uppercase">vc</span>
-        </h1>
+      <header className={`fixed top-0 left-0 right-0 ${isDesktopSidebarCollapsed ? 'lg:left-[76px]' : 'lg:left-[240px]'} z-50 flex items-center justify-between px-6 py-4 bar-fume transition-all duration-300 border-b border-white/5`}>
+        <div className="flex items-center gap-4">
+          <button 
+            onClick={() => setIsSidebarOpen(true)}
+            className="lg:hidden w-10 h-10 rounded-full border border-secondary/20 overflow-hidden flex items-center justify-center bg-primary active:scale-90 transition-transform"
+          >
+            <span className="material-symbols-outlined text-secondary text-xl">menu</span>
+          </button>
+        </div>
         <Link to="/checkout" className="text-surface hover:opacity-80 transition-opacity active:scale-95 duration-150 ease-in-out relative">
           <div className="relative">
             <span className="material-symbols-outlined">shopping_cart</span>

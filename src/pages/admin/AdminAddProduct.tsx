@@ -9,8 +9,11 @@ import NotificationSino from '../../components/NotificationSino';
 import MenuButton from '../../components/MenuButton';
 import { maskCurrency, parseCurrency } from '../../lib/utils';
 import imageCompression from 'browser-image-compression';
+import { useTheme } from '../../contexts/ThemeContext';
+import { Plus, Trash2 } from 'lucide-react';
 
 export default function AdminAddProduct() {
+  const { isDesktopSidebarCollapsed } = useTheme();
   const navigate = useNavigate();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [costPrice, setCostPrice] = useState('');
@@ -24,6 +27,11 @@ export default function AdminAddProduct() {
   const [category, setCategory] = useState('');
   const [colors, setColors] = useState('');
   const [entryDate, setEntryDate] = useState(new Date().toISOString().split('T')[0]);
+  
+  // Stock variations (Cores, Quantidades, SKUs)
+  const [variations, setVariations] = useState<Array<{ color: string; quantity: number | ''; sku: string }>>([
+    { color: '', quantity: 1, sku: '' }
+  ]);
   const [modalConfig, setModalConfig] = useState<{
     isOpen: boolean;
     title: string;
@@ -167,39 +175,56 @@ export default function AdminAddProduct() {
         imageUrls.push(publicUrl);
       }
 
-      // 2. Save Product
+      // 2. Save Product (with variations if specified)
       const sPrice = parseCurrency(salePrice);
       const dPercent = hasDiscount ? (Number(discount) || 0) : 0;
       const dPrice = sPrice * (1 - dPercent / 100);
 
-      const productData = {
+      const baseProductData = {
         name: formData.get('name'),
         brand: formData.get('brand'),
         model,
         category: category,
-        sku: sku,
         description: formData.get('description'),
         cost_price: parseCurrency(costPrice),
         sale_price: sPrice,
         discount: dPercent,
         discounted_price: dPrice,
-        stock: Number(stock),
-        individual_ids: individualIds,
         is_kit: formData.get('is_kit') === 'on',
-        colors: typeof colors === 'string' 
-                ? colors.split(',').map(c => c.trim()) 
-                : (colors || []),
         accessories: formData.get('accessories'),
         published: formData.get('published') === 'on',
         featured: formData.get('featured') === 'on',
         image_url: imageUrls[0] || '',
-        images: imageUrls, // Store all images in an array
-        img: imageUrls[0] || '', // Backward compatibility
+        images: imageUrls,
+        img: imageUrls[0] || '',
         entry_date: entryDate
       };
 
-      const { data: newProduct, error } = await supabase.from('products').insert([productData]).select().single();
-      if (error) throw error;
+      const validVariations = variations.filter(v => v.color.trim() !== '');
+
+      if (validVariations.length > 0) {
+        for (const v of validVariations) {
+          const variantSku = v.sku || `${sku}-${v.color.toUpperCase()}`;
+          const variantData = {
+            ...baseProductData,
+            sku: variantSku,
+            stock: Number(v.quantity) || 1,
+            colors: [v.color.trim()],
+            model: model ? `${model} (${v.color.trim()})` : v.color.trim()
+          };
+          const { error: insErr } = await supabase.from('products').insert(variantData);
+          if (insErr) throw insErr;
+        }
+      } else {
+        const productData = {
+          ...baseProductData,
+          sku: sku,
+          stock: Number(stock) || 1,
+          colors: typeof colors === 'string' ? colors.split(',').map(c => c.trim()) : []
+        };
+        const { error: insErr } = await supabase.from('products').insert(productData);
+        if (insErr) throw insErr;
+      }
       
       setModalConfig({
         isOpen: true,
@@ -226,162 +251,163 @@ export default function AdminAddProduct() {
     <div className="min-h-screen global-bg text-surface font-body flex flex-col">
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
-      <main className="flex-1 min-w-0 p-0 pb-28 ">
-        <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 bar-fume mb-10">
+      <main className={`flex-1 min-w-0 p-0 pb-20 ${isDesktopSidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-[240px]'} transition-all duration-300`}>
+        <header className={`fixed top-0 left-0 right-0 ${isDesktopSidebarCollapsed ? 'lg:left-[76px]' : 'lg:left-[240px]'} z-30 flex items-center justify-between px-4 sm:px-6 py-3 bar-fume transition-all duration-300 border-b border-white/5`}>
           <div className="flex items-center gap-4">
-            <MenuButton onClick={() => setIsSidebarOpen(true)} />
-            <div>
-              <div className="flex items-center gap-4">
-                <Link to="/admin/inventory" className="text-surface/60 hover:text-secondary transition-colors">
-                  <span className="material-symbols-outlined">arrow_back</span>
-                </Link>
-                <h2 className="font-headline text-2xl italic">Novo Produto <span className="text-secondary">VC</span></h2>
-              </div>
-            </div>
+            <button 
+              type="button"
+              onClick={() => navigate(-1)}
+              className="flex items-center gap-2 text-surface/70 hover:text-secondary transition-colors text-xs font-bold uppercase tracking-wider cursor-pointer"
+              title="Voltar"
+            >
+              <span className="material-symbols-outlined text-xl">arrow_back</span>
+              <span>Voltar</span>
+            </button>
           </div>
           <div className="flex items-center gap-4">
             <NotificationSino />
           </div>
         </header>
 
-        <div className="px-5 md:px-10 pt-24">
-          <div className="mb-8">
-            <h2 className="font-headline text-3xl italic">Cadastrar Produto</h2>
-            <p className="text-surface/60 text-sm mt-1">Adicione uma nova peça ao catálogo da loja.</p>
+        <div className="px-4 sm:px-6 lg:px-8 max-w-[1600px] mx-auto pt-20 pb-6">
+          <div className="mb-4">
+            <h2 className="font-headline text-2xl italic">Cadastrar Produto <span className="text-secondary">VC</span></h2>
+            <p className="text-surface/40 text-[10px] uppercase tracking-[0.2em] font-bold mt-0.5">
+              Adicione uma nova peça ao catálogo da loja
+            </p>
           </div>
 
-        <form onSubmit={handleSubmit} className="max-w-4xl grid grid-cols-1 lg:grid-cols-3 gap-8 pb-10">
+        <form onSubmit={handleSubmit} className="max-w-7xl grid grid-cols-1 lg:grid-cols-12 gap-4 pb-8">
           {/* Form Column */}
-          <div className="lg:col-span-2 glass-card rounded-2xl p-5 sm:p-8">
-            <div className="space-y-8">
+          <div className="lg:col-span-7 glass-card rounded-[16px] p-4 sm:p-5">
+            <div className="space-y-5">
               <section>
-                <h3 className="text-secondary text-sm font-bold uppercase tracking-widest mb-6 border-b border-secondary/20 pb-2">Detalhes da Peça</h3>
-                <div className="space-y-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Nome do Produto</label>
-                    <input type="text" name="name" required className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors font-headline text-lg" placeholder="Ex: Classic Flap Bag Jumbo" />
+                <h3 className="text-secondary text-xs font-bold uppercase tracking-widest mb-3 border-b border-secondary/20 pb-1.5">Detalhes da Peça</h3>
+                <div className="space-y-3.5">
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60 font-bold">Nome do Produto</label>
+                    <input type="text" name="name" required className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-2 px-3 text-surface focus:outline-none focus:border-secondary transition-colors font-headline text-base" placeholder="Ex: Classic Flap Bag Jumbo" />
                   </div>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Marca / Designer</label>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60 font-bold">Marca / Designer</label>
                       <input 
                         type="text" 
                         name="brand" 
                         required 
-                        className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors" 
+                        className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-2 px-3 text-xs text-surface focus:outline-none focus:border-secondary transition-colors" 
                         placeholder="Ex: Chanel, Hermès..." 
                       />
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Modelo</label>
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60 font-bold">Modelo</label>
                       <input 
                         type="text" 
                         value={model}
                         onChange={(e) => setModel(e.target.value)}
-                        className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors" 
+                        className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-2 px-3 text-xs text-surface focus:outline-none focus:border-secondary transition-colors" 
                         placeholder="Ex: LT706, Classic Flap..." 
                       />
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Categoria</label>
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60 font-bold">Categoria</label>
                       <select 
                         name="category" 
                         required 
-                        className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors appearance-none"
+                        className="w-full bg-primary/80 backdrop-blur-sm border border-secondary/20 rounded-lg py-2 px-3 text-xs text-surface font-semibold focus:outline-none focus:border-secondary transition-colors cursor-pointer hover:border-secondary/40 shadow-inner"
                         value={category}
                         onChange={handleCategoryChange}
                       >
-                        <option value="">Selecione...</option>
-                        <option value="bolsas">Bolsas</option>
-                        <option value="maletas">Maletas</option>
-                        <option value="carteiras">Carteiras</option>
-                        <option value="acessorios">Acessórios</option>
+                        <option value="" className="bg-[#0B111D] text-surface">Selecione...</option>
+                        <option value="bolsas" className="bg-[#0B111D] text-surface">Bolsas</option>
+                        <option value="maletas" className="bg-[#0B111D] text-surface">Maletas</option>
+                        <option value="carteiras" className="bg-[#0B111D] text-surface">Carteiras</option>
+                        <option value="acessorios" className="bg-[#0B111D] text-surface">Acessórios</option>
                       </select>
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">ID (Código de Rastreio)</label>
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60 font-bold">ID (Código de Rastreio)</label>
                       <input 
                         type="text" 
-                        className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors font-mono" 
+                        className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-2 px-3 text-xs text-surface focus:outline-none focus:border-secondary transition-colors font-mono" 
                         value={sku}
                         onChange={(e) => setSku(e.target.value)}
                         placeholder="Gerado automaticamente..."
                       />
-                      <p className="text-[9px] text-surface/60 italic">Pode ser editado manualmente se necessário</p>
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Data de Entrada</label>
-                    <input 
-                      type="date" 
-                      required
-                      value={entryDate}
-                      onChange={(e) => setEntryDate(e.target.value)}
-                      className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors" 
-                    />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60 font-bold">Data de Entrada</label>
+                      <input 
+                        type="date" 
+                        required
+                        value={entryDate}
+                        onChange={(e) => setEntryDate(e.target.value)}
+                        className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-2 px-3 text-xs text-surface focus:outline-none focus:border-secondary transition-colors" 
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60 font-bold">Acompanha</label>
+                      <input type="text" name="accessories" className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-2 px-3 text-xs text-surface focus:outline-none focus:border-secondary transition-colors" placeholder="Caixa, Dust bag..." />
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Descrição Detalhada</label>
-                    <textarea name="description" className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors min-h-[120px]" placeholder="Descreva o material, ano, condições, etc."></textarea>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60 font-bold">Descrição Detalhada</label>
+                    <textarea name="description" className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-2 px-3 text-xs text-surface focus:outline-none focus:border-secondary transition-colors min-h-[70px]" placeholder="Descreva o material, ano, condições, etc."></textarea>
                   </div>
                 </div>
               </section>
 
               <section>
-                <h3 className="text-secondary text-sm font-bold uppercase tracking-widest mb-6 border-b border-secondary/20 pb-2">Precificação & Estoque</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Valor Pago (R$)</label>
-                    <input 
-                      type="text" 
-                      inputMode="decimal"
-                      required
-                      value={costPrice}
-                      onChange={(e) => setCostPrice(maskCurrency(e.target.value))}
-                      className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors" 
-                      placeholder="R$ 0,00" 
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Preço de Venda (R$)</label>
-                    <input 
-                      type="text" 
-                      inputMode="decimal"
-                      required
-                      value={salePrice}
-                      onChange={(e) => setSalePrice(maskCurrency(e.target.value))}
-                      className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors font-bold text-secondary" 
-                      placeholder="R$ 0,00" 
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">% de Lucro</label>
-                    <div className="w-full bg-primary/20 backdrop-blur-sm border border-secondary/10 rounded-lg py-3 px-4 text-emerald-400 font-bold">
-                      {profitPercentage}%
+                <h3 className="text-secondary text-xs font-bold uppercase tracking-widest mb-3 border-b border-secondary/20 pb-1.5">Precificação & Estoque</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60 font-bold">Valor Pago (Custo)</label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <span className="text-secondary font-bold text-xs">R$</span>
+                      </div>
+                      <input 
+                        type="text" 
+                        inputMode="decimal"
+                        required
+                        value={costPrice}
+                        onChange={(e) => setCostPrice(maskCurrency(e.target.value))}
+                        className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-2 pl-9 pr-3 text-xs text-surface focus:outline-none focus:border-secondary focus:ring-1 focus:ring-secondary/50 transition-colors" 
+                        placeholder="0,00" 
+                      />
                     </div>
-                    <p className="text-[9px] text-surface/40 italic">Calculado automaticamente</p>
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Quantidade em Estoque</label>
-                    <input 
-                      type="number" 
-                      required
-                      inputMode="numeric"
-                      value={stock}
-                      onChange={(e) => setStock(e.target.value === '' ? '' : Number(e.target.value))}
-                      className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors" 
-                      placeholder="1" 
-                      min="0" 
-                    />
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60 font-bold">Preço de Venda</label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <span className="text-secondary font-bold text-xs">R$</span>
+                      </div>
+                      <input 
+                        type="text" 
+                        inputMode="decimal"
+                        required
+                        value={salePrice}
+                        onChange={(e) => setSalePrice(maskCurrency(e.target.value))}
+                        className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/25 rounded-lg py-2 pl-9 pr-3 text-xs text-surface focus:outline-none focus:border-secondary focus:ring-1 focus:ring-secondary/50 transition-colors font-black text-secondary" 
+                        placeholder="0,00" 
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1 md:col-span-2 flex items-center justify-between bg-primary/20 p-2.5 rounded-lg border border-secondary/10">
+                    <span className="text-[10px] uppercase tracking-[0.2em] text-surface/60 font-bold">% de Lucro Estimado</span>
+                    <span className="text-emerald-400 font-bold text-sm">{profitPercentage}%</span>
                   </div>
 
-                  <div className="md:col-span-2 space-y-4">
-                    <div className="flex items-center justify-between p-4 rounded-xl bg-primary/20 border border-secondary/10">
+                  <div className="md:col-span-2 space-y-2">
+                    <div className="flex items-center justify-between p-2.5 rounded-lg bg-primary/20 border border-secondary/10">
                       <div className="flex flex-col">
-                        <span className="text-sm text-surface">Oferecer Desconto?</span>
-                        <p className="text-[10px] text-surface/40 italic">Ative para definir uma porcentagem de desconto</p>
+                        <span className="text-xs text-surface font-medium">Oferecer Desconto?</span>
                       </div>
                       <label className="relative inline-flex items-center cursor-pointer">
                         <input
@@ -393,19 +419,19 @@ export default function AdminAddProduct() {
                             if (!e.target.checked) setDiscount('');
                           }}
                         />
-                        <div className="w-11 h-6 bg-primary border border-secondary/30 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-secondary after:border-secondary after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-secondary/20"></div>
+                        <div className="w-9 h-5 bg-primary border border-secondary/30 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-secondary after:border-secondary after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-secondary/20"></div>
                       </label>
                     </div>
 
                     {hasDiscount && (
-                      <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300">
-                        <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Desconto (%)</label>
+                      <div className="space-y-1 animate-in fade-in slide-in-from-top-2 duration-300">
+                        <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60 font-bold">Desconto (%)</label>
                         <input
                           type="number"
                           inputMode="decimal"
                           value={discount}
                           onChange={(e) => setDiscount(e.target.value === '' ? '' : Number(e.target.value))}
-                          className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors"
+                          className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-2 px-3 text-xs text-surface focus:outline-none focus:border-secondary transition-colors"
                           placeholder="Ex: 10"
                           min="0"
                           max="100"
@@ -415,37 +441,111 @@ export default function AdminAddProduct() {
                   </div>
 
                   {hasDiscount && discount && salePrice && (
-                    <div className="md:col-span-2 p-3 rounded-lg bg-secondary/10 border border-secondary/20">
-                      <p className="text-xs text-secondary font-bold uppercase tracking-widest">
+                    <div className="md:col-span-2 p-2.5 rounded-lg bg-secondary/10 border border-secondary/20">
+                      <p className="text-[11px] text-secondary font-bold uppercase tracking-widest">
                         Preço com Desconto: R$ {(parseCurrency(salePrice) * (1 - Number(discount) / 100)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                       </p>
                     </div>
                   )}
-                  <div className="space-y-2">
-                    <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Acompanha</label>
-                    <input type="text" name="accessories" className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors" placeholder="Caixa, Dust bag, Cartão..." />
-                  </div>
 
-                  <div className="md:col-span-2 space-y-2">
-                    <label className="text-[10px] uppercase tracking-[0.2em] text-surface/60">Cor Disponível</label>
-                    <input 
-                      type="text" 
-                      value={colors}
-                      onChange={(e) => setColors(e.target.value)}
-                      className="w-full bg-primary/40 backdrop-blur-sm border border-secondary/20 rounded-lg py-3 px-4 text-surface focus:outline-none focus:border-secondary transition-colors" 
-                      placeholder="Ex: Preto, Nude, Caramelo (separe por vírgula)" 
-                    />
+                  <div className="md:col-span-2 space-y-3 pt-2 border-t border-secondary/10">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-secondary text-xs font-bold uppercase tracking-widest">Variações de Estoque</h4>
+                      <span className="text-[10px] text-surface/50">{variations.length} {variations.length === 1 ? 'linha' : 'linhas'}</span>
+                    </div>
+
+                    <div className="space-y-2">
+                      {variations.map((v, index) => (
+                        <div key={index} className="glass-card p-2.5 rounded-lg border border-secondary/20 flex flex-col sm:flex-row items-center gap-2">
+                          <div className="flex-1 w-full space-y-0.5">
+                            <label className="text-[8px] uppercase tracking-wider text-surface/50 font-bold">Cor</label>
+                            <input 
+                              type="text" 
+                              value={v.color}
+                              onChange={(e) => {
+                                const newVars = [...variations];
+                                newVars[index].color = e.target.value;
+                                setVariations(newVars);
+                              }}
+                              placeholder="Ex: Preto"
+                              className="w-full bg-primary/40 border border-secondary/20 rounded-md py-1.5 px-2.5 text-xs text-surface focus:outline-none focus:border-secondary"
+                            />
+                          </div>
+
+                          <div className="w-full sm:w-28 space-y-0.5">
+                            <label className="text-[8px] uppercase tracking-wider text-surface/50 font-bold">Qtd</label>
+                            <input 
+                              type="number" 
+                              min="1"
+                              value={v.quantity}
+                              onChange={(e) => {
+                                const newVars = [...variations];
+                                newVars[index].quantity = e.target.value === '' ? '' : Number(e.target.value);
+                                setVariations(newVars);
+                              }}
+                              placeholder="1"
+                              className="w-full bg-primary/40 border border-secondary/20 rounded-md py-1.5 px-2.5 text-xs text-surface font-bold focus:outline-none focus:border-secondary"
+                            />
+                          </div>
+
+                          <div className="flex-1 w-full space-y-0.5">
+                            <label className="text-[8px] uppercase tracking-wider text-surface/50 font-bold">SKU</label>
+                            <input 
+                              type="text" 
+                              value={v.sku || sku}
+                              onChange={(e) => {
+                                const newVars = [...variations];
+                                newVars[index].sku = e.target.value;
+                                setVariations(newVars);
+                              }}
+                              placeholder={sku || "MODELO"}
+                              className="w-full bg-primary/40 border border-secondary/20 rounded-md py-1.5 px-2.5 text-xs text-surface font-mono focus:outline-none focus:border-secondary"
+                            />
+                          </div>
+
+                          <div className="self-end sm:self-center pt-1 sm:pt-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (variations.length === 1) return;
+                                setVariations(variations.filter((_, i) => i !== index));
+                              }}
+                              disabled={variations.length === 1}
+                              className={`p-2 rounded-lg border transition-all ${
+                                variations.length === 1 
+                                  ? 'opacity-30 border-white/5 cursor-not-allowed' 
+                                  : 'border-rose-500/30 text-rose-400 hover:bg-rose-500/10'
+                              }`}
+                              title="Remover variação"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setVariations(prev => [...prev, { color: '', quantity: 1, sku: `${sku}-${prev.length + 1}` }]);
+                      }}
+                      className="w-full py-2 rounded-lg border border-secondary/30 text-secondary hover:bg-secondary/10 font-bold uppercase tracking-widest text-[10px] transition-all flex items-center justify-center gap-1.5 bg-primary/40 shadow-sm"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Adicionar Outra Cor
+                    </button>
                   </div>
 
                   {individualIds.length > 0 && (
-                    <div className="md:col-span-2 space-y-4 p-4 rounded-xl bg-secondary/5 border border-secondary/10">
+                    <div className="md:col-span-2 space-y-2 p-3 rounded-lg bg-secondary/5 border border-secondary/10">
                       <div className="flex items-center justify-between">
-                        <label className="text-[10px] uppercase tracking-[0.2em] text-secondary font-bold">IDs Individuais de Rastreio</label>
-                        <span className="text-[10px] text-surface/40 italic">{individualIds.length} itens gerados</span>
+                        <label className="text-[9px] uppercase tracking-[0.2em] text-secondary font-bold">IDs Individuais de Rastreio</label>
+                        <span className="text-[9px] text-surface/40 italic">{individualIds.length} itens gerados</span>
                       </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1.5 max-h-32 overflow-y-auto pr-1 custom-scrollbar">
                         {individualIds.map((id, index) => (
-                          <div key={index} className="bg-primary/40 border border-secondary/20 rounded px-2 py-1 text-[10px] font-mono text-surface/80 flex items-center justify-between group">
+                          <div key={index} className="bg-primary/40 border border-secondary/20 rounded px-2 py-0.5 text-[9px] font-mono text-surface/80 flex items-center justify-between group">
                             <span>{id}</span>
                             <button 
                               type="button"
@@ -465,7 +565,6 @@ export default function AdminAddProduct() {
                           </div>
                         ))}
                       </div>
-                      <p className="text-[9px] text-surface/40 italic">Estes IDs facilitam o rastreio individual de cada peça no estoque.</p>
                     </div>
                   )}
                 </div>
@@ -473,61 +572,61 @@ export default function AdminAddProduct() {
             </div>
           </div>
 
-          {/* Image Upload Column */}
-          <div className="space-y-6">
-            <div className="glass-card rounded-2xl p-6">
-              <h3 className="text-secondary text-sm font-bold uppercase tracking-widest mb-4 border-b border-secondary/20 pb-2">Imagens</h3>
+          {/* Image Upload & Options Column */}
+          <div className="lg:col-span-5 space-y-4">
+            <div className="glass-card rounded-[16px] p-4 sm:p-5">
+              <h3 className="text-secondary text-xs font-bold uppercase tracking-widest mb-3 border-b border-secondary/20 pb-1.5">Imagens</h3>
               
-              <div className="grid grid-cols-2 gap-4 mb-4">
+              <div className="grid grid-cols-2 gap-3 mb-2">
                 {imagePreviews.map((preview, index) => (
-                  <div key={index} className="relative aspect-[3/4] rounded-xl overflow-hidden group border border-secondary/10">
+                  <div key={index} className="relative aspect-[3/4] rounded-lg overflow-hidden group border border-secondary/10">
                     <img src={preview} alt={`Preview ${index}`} className="w-full h-full object-cover" />
                     <button 
                       type="button"
                       onClick={() => removeImage(index)}
-                      className="absolute top-2 right-2 w-8 h-8 rounded-full bg-red-500/80 text-white flex items-center justify-center opacity-50 group-hover:opacity-100 transition-opacity"
+                      className="absolute top-1.5 right-1.5 w-7 h-7 rounded-full bg-red-500/80 text-white flex items-center justify-center opacity-50 group-hover:opacity-100 transition-opacity"
                     >
-                      <span className="material-symbols-outlined text-sm">delete</span>
+                      <span className="material-symbols-outlined text-xs">delete</span>
                     </button>
                     {index === 0 && (
-                      <div className="absolute bottom-0 left-0 right-0 bg-secondary/80 text-primary text-[8px] font-bold uppercase py-1 text-center">
+                      <div className="absolute bottom-0 left-0 right-0 bg-secondary/80 text-primary text-[8px] font-bold uppercase py-0.5 text-center">
                         Principal
                       </div>
                     )}
                   </div>
                 ))}
                 
-                <label className="aspect-[3/4] border-2 border-dashed border-secondary/30 rounded-xl flex flex-col items-center justify-center text-surface/40 hover:text-secondary hover:border-secondary/60 transition-colors cursor-pointer bg-primary/30 overflow-hidden relative">
-                  <span className="material-symbols-outlined text-4xl mb-2">add_photo_alternate</span>
-                  <span className="text-[10px] font-medium uppercase tracking-wider">Adicionar Foto</span>
+                <label className="aspect-[3/4] border-2 border-dashed border-secondary/30 rounded-lg flex flex-col items-center justify-center text-surface/40 hover:text-secondary hover:border-secondary/60 transition-colors cursor-pointer bg-primary/30 overflow-hidden relative">
+                  <span className="material-symbols-outlined text-3xl mb-1">add_photo_alternate</span>
+                  <span className="text-[9px] font-medium uppercase tracking-wider">Adicionar Foto</span>
                   <input type="file" accept="image/*" multiple onChange={handleImageChange} className="hidden" />
                 </label>
               </div>
               
-              <p className="text-[10px] text-surface/40 italic">A primeira imagem será a principal do catálogo.</p>
+              <p className="text-[9px] text-surface/40 italic">A primeira imagem será a principal do catálogo.</p>
             </div>
 
-            <div className="glass-card rounded-2xl p-6 space-y-4">
-               <h3 className="text-secondary text-sm font-bold uppercase tracking-widest mb-2 border-b border-secondary/20 pb-2">Status</h3>
+            <div className="glass-card rounded-[16px] p-4 sm:p-5 space-y-3">
+               <h3 className="text-secondary text-xs font-bold uppercase tracking-widest mb-2 border-b border-secondary/20 pb-1.5">Status & Visibilidade</h3>
                <div className="flex items-center justify-between">
-                  <span className="text-sm text-surface">Este produto é um Kit?</span>
+                  <span className="text-xs text-surface font-medium">Este produto é um Kit?</span>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input type="checkbox" name="is_kit" value="on" className="sr-only peer" />
-                    <div className="w-11 h-6 bg-primary border border-secondary/30 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-secondary after:border-secondary after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-secondary/20"></div>
+                    <div className="w-9 h-5 bg-primary border border-secondary/30 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-secondary after:border-secondary after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-secondary/20"></div>
                   </label>
                </div>
                <div className="flex items-center justify-between">
-                  <span className="text-sm text-surface">Publicar no catálogo?</span>
+                  <span className="text-xs text-surface font-medium">Publicar no catálogo?</span>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input type="checkbox" name="published" value="on" className="sr-only peer" defaultChecked />
-                    <div className="w-11 h-6 bg-primary border border-secondary/30 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-secondary after:border-secondary after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-secondary/20"></div>
+                    <div className="w-9 h-5 bg-primary border border-secondary/30 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-secondary after:border-secondary after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-secondary/20"></div>
                   </label>
                </div>
                <div className="flex items-center justify-between">
-                  <span className="text-sm text-surface">Destaque na Home?</span>
+                  <span className="text-xs text-surface font-medium">Destaque na Home?</span>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input type="checkbox" name="featured" value="on" className="sr-only peer" />
-                    <div className="w-11 h-6 bg-primary border border-secondary/30 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-secondary after:border-secondary after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-secondary/20"></div>
+                    <div className="w-9 h-5 bg-primary border border-secondary/30 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-secondary after:border-secondary after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-secondary/20"></div>
                   </label>
                </div>
             </div>
@@ -535,7 +634,7 @@ export default function AdminAddProduct() {
             <button 
               type="submit" 
               disabled={uploading}
-              className="w-full py-4 rounded-xl bg-secondary text-primary hover:bg-secondary/90 transition-colors text-sm font-bold uppercase tracking-widest shadow-lg shadow-secondary/20 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full py-3 rounded-xl bg-secondary text-primary hover:bg-secondary/90 transition-colors text-xs font-bold uppercase tracking-widest shadow-md shadow-secondary/20 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {uploading ? 'Salvando...' : 'Salvar Produto'}
             </button>

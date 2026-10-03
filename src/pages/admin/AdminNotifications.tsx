@@ -6,92 +6,64 @@ import BottomNavigation from '../../components/BottomNavigation';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { toast } from 'sonner';
-import { supabase } from '../../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { api, NotificationItem } from '../../services/api';
 import NotificationSino from '../../components/NotificationSino';
 import MenuButton from '../../components/MenuButton';
 import NotificationModal from '../../components/NotificationModal';
-import { motion, AnimatePresence } from 'motion/react'; // Pode ser 'framer-motion' dependendo da sua versão
-
-// Interface para o banco de dados
-interface DBNotification {
-  id: string;
-  created_at: string;
-  type: string;
-  title: string;
-  message: string;
-  is_read: boolean;
-  priority: string;
-}
+import { motion, AnimatePresence } from 'motion/react';
+import { useTheme } from '../../contexts/ThemeContext';
 
 export default function AdminNotifications() {
+  const { isDesktopSidebarCollapsed } = useTheme();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
-  const [notifications, setNotifications] = useState<DBNotification[]>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // 1. Carregar notificações iniciais
+  // 1. Carregar notificações
   const fetchNotifications = async () => {
     try {
       setLoading(true);
-      console.log("🔍 Buscando notificações no Supabase...");
-      
-      const { data, error } = await supabase
-        .from('notifications')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('❌ Erro do Supabase ao buscar:', error);
-        throw error;
-      }
-      
-      console.log("✅ Dados recebidos do banco:", data);
+      const data = await api.notifications.getAll();
       setNotifications(data || []);
-    } catch (error) {
-      console.error('❌ Erro geral ao buscar notificações:', error);
-      toast.error('Erro ao carregar notificações.');
+    } catch {
+      setNotifications([]);
     } finally {
       setLoading(false);
     }
   };
 
-  // 2. Configurar Escuta em Tempo Real (Realtime)
+  // 2. Configurar Escuta em Tempo Real (Realtime se Supabase configurado)
   useEffect(() => {
     fetchNotifications();
 
-    console.log("🎧 Iniciando escuta em tempo real (Realtime)...");
-    const channel = supabase
-      .channel('admin-notifications')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'notifications' },
-        (payload) => {
-          console.log("🔔 NOVA NOTIFICAÇÃO CHEGOU EM TEMPO REAL!", payload);
-          const newNotif = payload.new as DBNotification;
-          setNotifications((prev) => [newNotif, ...prev]);
-          
-          // Feedback visual e sonoro
-          toast.success(`Novo Alerta: ${newNotif.title}`, {
-            icon: <Bell className="w-4 h-4 text-secondary" />
-          });
-          new Audio('/notification-sound.mp3').play().catch(() => {
-            console.log("Áudio bloqueado pelo navegador até o usuário interagir.");
-          });
-        }
-      )
-      .subscribe((status) => {
-        console.log("📡 Status da conexão Realtime:", status);
-      });
+    if (!isSupabaseConfigured) return;
 
-    return () => {
-      console.log("🛑 Parando escuta em tempo real...");
-      supabase.removeChannel(channel);
-    };
+    try {
+      const channel = supabase
+        .channel('admin-notifications')
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'notifications' },
+          (payload) => {
+            const newNotif = payload.new as NotificationItem;
+            setNotifications((prev) => [newNotif, ...prev]);
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    } catch {
+      // ignore
+    }
   }, []);
 
   // Mapeamento de Ícones baseado no TYPE do banco
   const getIcon = (type: string) => {
-    switch (type?.toLowerCase()) { // Adicionado toLowerCase por segurança
+    switch (type?.toLowerCase()) {
       case 'venda': return <CheckCircle2 className="w-6 h-6" />;
       case 'estoque': return <AlertTriangle className="w-6 h-6" />;
       case 'pagamento': return <AlertTriangle className="w-6 h-6" />;
@@ -112,66 +84,39 @@ export default function AdminNotifications() {
   };
 
   const markAsRead = async (id: string) => {
-    const { error } = await supabase
-      .from('notifications')
-      .update({ is_read: true })
-      .eq('id', id);
-
-    if (!error) {
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
-    } else {
-      console.error("Erro ao marcar como lida:", error);
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+    if (isSupabaseConfigured) {
+      await supabase.from('notifications').update({ is_read: true }).eq('id', id);
     }
   };
 
   const markAllAsRead = async () => {
-    const { error } = await supabase
-      .from('notifications')
-      .update({ is_read: true })
-      .eq('is_read', false);
-
-    if (!error) {
-      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
-      toast.success('Todas as mensagens marcadas como lidas.');
-    } else {
-      console.error("Erro ao marcar todas como lidas:", error);
-    }
+    await api.notifications.markAllAsRead();
+    setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+    toast.success('Todas as mensagens marcadas como lidas.');
   };
 
   const removeNotification = async (id: string) => {
-    const { error } = await supabase.from('notifications').delete().eq('id', id);
-    if (!error) {
-      setNotifications(prev => prev.filter(n => n.id !== id));
-    } else {
-      console.error("Erro ao excluir notificação:", error);
-    }
+    await api.notifications.delete(id);
+    setNotifications(prev => prev.filter(n => n.id !== id));
   };
 
   const confirmClearAll = async () => {
-    // Truque válido no Supabase para deletar tudo
-    const { error } = await supabase.from('notifications').delete().neq('id', '00000000-0000-0000-0000-000000000000'); 
-    if (!error) {
-      setNotifications([]);
-      setIsClearModalOpen(false);
-      toast.success('Histórico limpo com sucesso.');
-    } else {
-      console.error("Erro ao limpar tudo:", error);
-    }
+    await api.notifications.clearAll();
+    setNotifications([]);
+    setIsClearModalOpen(false);
+    toast.success('Histórico limpo com sucesso.');
   };
 
   return (
     <div className="min-h-screen global-bg text-surface font-body flex flex-col">
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
-      <main className="flex-1 min-w-0 p-0 pb-28">
-        <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 bar-fume mb-6">
+      <main className={`flex-1 min-w-0 p-0 pb-28 ${isDesktopSidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-[240px]'} transition-all duration-300`}>
+        <header className={`fixed top-0 left-0 right-0 ${isDesktopSidebarCollapsed ? 'lg:left-[76px]' : 'lg:left-[240px]'} z-30 flex items-center justify-between px-6 py-4 bar-fume mb-6 transition-all duration-300`}>
           <div className="flex items-center gap-4">
-            <MenuButton onClick={() => setIsSidebarOpen(true)} />
-            <div className="flex items-center gap-4">
-              <Link to="/admin/dashboard" className="text-surface/60 hover:text-secondary transition-colors">
-                <ArrowLeft className="w-5 h-5" />
-              </Link>
-              <h2 className="font-headline text-xl italic">Notificações <span className="text-secondary">VC</span></h2>
+            <div className="lg:hidden">
+              <MenuButton onClick={() => setIsSidebarOpen(true)} />
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -179,11 +124,18 @@ export default function AdminNotifications() {
           </div>
         </header>
 
-        <div className="px-5 md:px-10 max-w-5xl mx-auto pt-24">
+        <div className="px-6 lg:px-10 max-w-[1600px] mx-auto pt-24">
           <div className="mb-10 flex flex-col sm:flex-row sm:items-end justify-between gap-6">
             <div>
-              <h2 className="font-headline text-3xl italic mb-1">Alertas & Avisos</h2>
-              <p className="text-surface/40 text-[10px] uppercase tracking-[0.2em] font-bold">Gestão inteligente de mensagens</p>
+              <div className="flex items-center gap-2">
+                <h2 className="font-headline text-3xl italic tracking-tight">Alertas <span className="text-secondary">VC</span></h2>
+                <span className="px-2.5 py-0.5 rounded-full bg-secondary/10 border border-secondary/20 text-secondary text-[11px] font-bold">
+                  {notifications.filter(n => !n.is_read).length} novos
+                </span>
+              </div>
+              <p className="text-surface/40 text-[10px] uppercase tracking-[0.2em] font-bold mt-1">
+                Central de notificações, avisos e alertas automáticos
+              </p>
             </div>
             
             <div className="flex items-center gap-3">

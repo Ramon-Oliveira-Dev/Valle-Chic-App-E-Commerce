@@ -10,8 +10,21 @@ export function formatCurrency(value: number | string): string {
   return new Intl.NumberFormat('pt-BR', {
     style: 'currency',
     currency: 'BRL',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(amount || 0);
 }
+
+export function formatBRLNumber(value: number | string | null | undefined): string {
+  if (value === null || value === undefined) return '0,00';
+  const amount = typeof value === 'string' ? parseFloat(value) : value;
+  if (isNaN(amount)) return '0,00';
+  return amount.toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 
 export function maskPhone(value: string): string {
   if (!value) return '';

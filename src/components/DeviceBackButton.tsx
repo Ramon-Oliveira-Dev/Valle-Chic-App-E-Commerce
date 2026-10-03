@@ -6,14 +6,6 @@ import { useLocation, useNavigate } from 'react-router-dom';
 const fallbackRoutes = new Set(['/', '/home']);
 
 export default function DeviceBackButton() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const pathnameRef = useRef(location.pathname);
-
-  useEffect(() => {
-    pathnameRef.current = location.pathname;
-  }, [location.pathname]);
-
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
 
@@ -22,12 +14,8 @@ export default function DeviceBackButton() {
 
     CapacitorApp.addListener('backButton', ({ canGoBack }) => {
       if (canGoBack || window.history.length > 1) {
-        navigate(-1);
+        window.history.back();
         return;
-      }
-
-      if (!fallbackRoutes.has(pathnameRef.current)) {
-        navigate('/home', { replace: true });
       }
     }).then((listener) => {
       if (!isMounted) {
@@ -44,7 +32,7 @@ export default function DeviceBackButton() {
       isMounted = false;
       removeListener?.();
     };
-  }, [navigate]);
+  }, []);
 
   return null;
 }

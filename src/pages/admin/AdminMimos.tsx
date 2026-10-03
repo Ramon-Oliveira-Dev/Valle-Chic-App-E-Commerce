@@ -130,8 +130,8 @@ export default function AdminMimos() {
                 <Gift size={20} />
               </div>
               <div className="text-center sm:text-left">
-                <h1 className="font-headline text-xl italic text-white">Central de Mimos</h1>
-                <p className="text-xs text-gray-400">Fidelização e Recompensas</p>
+                <h1 className="font-headline text-xl italic text-white">Mimos <span className="text-[#D4AF37]">VC</span></h1>
+                <p className="text-[10px] text-gray-400 uppercase tracking-[0.2em] font-bold">Fidelização e Recompensas</p>
               </div>
             </div>
           </div>

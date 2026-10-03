@@ -1,14 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCartStore } from '../store/cartStore';
-import { supabase } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { getFallbackProducts } from '../data/products';
 import BottomNavigation from '../components/BottomNavigation';
 import Sidebar from '../components/Sidebar';
 import ProductImage from '../components/ProductImage';
 import { productToCartItem } from '../lib/productMetadata';
+import { useTheme } from '../contexts/ThemeContext';
 
 export default function Acessorios() {
   const navigate = useNavigate();
+  const { isDesktopSidebarCollapsed } = useTheme();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [acessorios, setAcessorios] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -22,27 +25,56 @@ export default function Acessorios() {
   const fetchAcessorios = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('products')
-        .select('*')
-        .in('category', ['acessorios', 'acessórios', 'Acessorios', 'Acessórios'])
-        .eq('published', true)
-        .gt('stock', 0);
+      let loadedData: any[] | null = null;
 
-      if (error) throw error;
-      setAcessorios(data || []);
+      if (isSupabaseConfigured) {
+        try {
+          const { data, error } = await supabase
+            .from('products')
+            .select('*')
+            .in('category', ['acessorios', 'acessórios', 'Acessorios', 'Acessórios'])
+            .eq('published', true)
+            .gt('stock', 0);
+
+          if (!error && data && data.length > 0) {
+            loadedData = data;
+          }
+        } catch (supabaseError) {
+          console.warn('Supabase not available for acessorios, using fallback.', supabaseError);
+        }
+      }
+
+      const fallback = getFallbackProducts().filter(p => {
+        const cat = (p.category || '').toLowerCase();
+        return cat === 'acessorios' || cat === 'acessórios';
+      });
+      setAcessorios(loadedData || fallback);
     } catch (error) {
-      console.error('Error fetching acessorios:', error);
+      console.warn('Error fetching acessorios:', error);
+      const fallback = getFallbackProducts().filter(p => {
+        const cat = (p.category || '').toLowerCase();
+        return cat === 'acessorios' || cat === 'acessórios';
+      });
+      setAcessorios(fallback);
     } finally {
       setLoading(false);
     }
   };
 
+  const calculateItemPrice = (item: any) => {
+    const basePrice = item.sale_price ?? item.price ?? 0;
+    const discount = item.discount || 0;
+    if (discount > 0) {
+      return item.discounted_price ?? (basePrice * (1 - discount / 100));
+    }
+    return basePrice;
+  };
+
   return (
-    <div className="global-bg text-surface font-body min-h-screen">
+    <div className={`global-bg text-surface font-body min-h-screen ${isDesktopSidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-[240px]'} transition-all duration-300`}>
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
       
-      <header className="fixed top-0 w-full z-50 flex items-center justify-between px-6 py-4 bar-fume">
+      <header className={`fixed top-0 left-0 right-0 ${isDesktopSidebarCollapsed ? 'lg:left-[76px]' : 'lg:left-[240px]'} z-50 flex items-center justify-between px-6 py-4 bar-fume transition-all duration-300 border-b border-white/5`}>
         <div className="flex items-center gap-4">
           <button 
             onClick={() => navigate(-1)}
@@ -52,20 +84,16 @@ export default function Acessorios() {
           </button>
           <button 
             onClick={() => setIsSidebarOpen(true)}
-            className="w-10 h-10 rounded-full border border-secondary/20 overflow-hidden flex items-center justify-center bg-primary active:scale-90 transition-transform"
+            className="lg:hidden w-10 h-10 rounded-full border border-secondary/20 overflow-hidden flex items-center justify-center bg-primary active:scale-90 transition-transform"
           >
             <span className="material-symbols-outlined text-secondary text-xl">menu</span>
           </button>
         </div>
-        <h1 className="font-headline text-2xl font-bold tracking-tighter text-stone-100 flex items-center gap-0.5">
-          <span className="material-symbols-outlined text-xl text-secondary" style={{ fontVariationSettings: "'FILL' 1" }}>favorite</span>
-          <span className="uppercase">vc</span>
-        </h1>
         <Link to="/checkout" className="text-surface hover:opacity-80 transition-opacity active:scale-95 duration-150 ease-in-out relative">
           <div className="relative">
             <span className="material-symbols-outlined">shopping_cart</span>
             {totalItems > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 bg-secondary text-primary text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full">
+              <span className="absolute -top-1.5 -right-1.5 bg-secondary text-primary text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full shadow-[0_0_8px_rgba(255,215,0,0.5)]">
                 {totalItems}
               </span>
             )}
@@ -73,19 +101,19 @@ export default function Acessorios() {
         </Link>
       </header>
 
-      <main className="pb-32 editorial-gradient min-h-screen max-w-5xl mx-auto px-6 pt-24">
-        <div className="mb-10">
-          <h2 className="font-headline text-4xl text-surface mb-2">Acessórios</h2>
-          <p className="text-surface/60 text-sm">Detalhes que fazem toda a diferença.</p>
+      <main className="pt-24 pb-20 px-6 max-w-lg mx-auto">
+        <div className="mb-8 text-center space-y-2">
+          <h2 className="font-headline text-4xl text-surface italic">Acessórios</h2>
+          <p className="font-label text-xs uppercase tracking-[0.2em] text-secondary">Detalhes que Transformam</p>
         </div>
 
-        {/* Category Navigation (Same as Home) */}
-        <div className="flex overflow-x-auto no-scrollbar gap-4 mb-10 pb-2 md:justify-center">
+        {/* Categorias Tabs Rápidas */}
+        <div className="flex gap-4 overflow-x-auto no-scrollbar pb-6 mb-6 border-b border-secondary/10">
           <Link to="/catalog" className="flex flex-col items-center gap-2 min-w-15">
             <div className="w-14 h-14 rounded-full bg-secondary/5 flex items-center justify-center border border-secondary/5 glass-card">
-              <span className="material-symbols-outlined text-secondary/60 text-xl">shopping_bag</span>
+              <span className="material-symbols-outlined text-secondary/60 text-xl">grid_view</span>
             </div>
-            <span className="text-[9px] uppercase tracking-[0.15em] text-surface/40">Bolsas</span>
+            <span className="text-[9px] uppercase tracking-[0.15em] text-surface/40">Todos</span>
           </Link>
           <Link to="/maletas" className="flex flex-col items-center gap-2 min-w-15">
             <div className="w-14 h-14 rounded-full bg-secondary/5 flex items-center justify-center border border-secondary/5 glass-card">
@@ -99,12 +127,12 @@ export default function Acessorios() {
             </div>
             <span className="text-[9px] uppercase tracking-[0.15em] text-surface/40">Carteiras</span>
           </Link>
-          <Link to="/acessorios" className="flex flex-col items-center gap-2 min-w-15">
-            <div className="w-14 h-14 rounded-full bg-secondary/10 flex items-center justify-center border border-secondary/5 glass-card active">
-              <span className="material-symbols-outlined text-secondary text-xl">styler</span>
+          <div className="flex flex-col items-center gap-2 min-w-15">
+            <div className="w-14 h-14 rounded-full bg-secondary flex items-center justify-center border border-secondary shadow-lg shadow-secondary/20">
+              <span className="material-symbols-outlined text-primary text-xl font-bold">styler</span>
             </div>
-            <span className="text-[9px] uppercase tracking-[0.15em] text-surface font-bold">Acessórios</span>
-          </Link>
+            <span className="text-[9px] uppercase tracking-[0.15em] text-secondary font-bold">Acessórios</span>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-8">
@@ -116,7 +144,7 @@ export default function Acessorios() {
             <div key={item.id} className="glass-card rounded-3xl overflow-hidden group shadow-2xl">
               <Link to={`/product/${item.id}`} className="block relative aspect-16/10">
                 <ProductImage 
-                  src={item.image_url || item.img || 'https://picsum.photos/seed/accessory/800/500'} 
+                  src={item.image_url || item.img || item.image || 'https://picsum.photos/seed/acc/800/500'} 
                   alt={item.name}
                   className="transition-opacity duration-700"
                   referrerPolicy="no-referrer"
@@ -135,13 +163,11 @@ export default function Acessorios() {
                     e.stopPropagation();
                     addItem(productToCartItem(
                       item,
-                      item.discount > 0
-                        ? (item.discounted_price ?? (item.sale_price ? item.sale_price * (1 - item.discount / 100) : item.sale_price))
-                        : item.sale_price
+                      calculateItemPrice(item)
                     ));
                   }}
-                  disabled={item.stock <= 0}
-                  className={`absolute bottom-4 right-4 flex items-center justify-center w-14 h-14 rounded-full shadow-2xl transition-transform duration-200 ${item.stock > 0 ? 'bg-secondary text-primary hover:scale-105' : 'bg-surface/10 text-surface/40 cursor-not-allowed'} border border-secondary/20`}
+                  disabled={(item.stock ?? 1) <= 0}
+                  className={`absolute bottom-4 right-4 flex items-center justify-center w-14 h-14 rounded-full shadow-2xl transition-transform duration-200 ${(item.stock ?? 1) > 0 ? 'bg-secondary text-primary hover:scale-105' : 'bg-surface/10 text-surface/40 cursor-not-allowed'} border border-secondary/20`}
                 >
                   <span className="material-symbols-outlined text-xl">shopping_cart</span>
                 </button>
@@ -151,12 +177,10 @@ export default function Acessorios() {
                   <h3 className="font-headline text-2xl text-surface group-hover/title:text-secondary transition-colors">{item.name}</h3>
                   <div className="text-right">
                     <p className="text-secondary font-bold text-xl">
-                      R$ {(item.discount > 0
-                        ? (item.discounted_price ?? (item.sale_price ? item.sale_price * (1 - item.discount / 100) : item.sale_price)) 
-                        : item.sale_price)?.toLocaleString('pt-BR')}
+                      R$ {calculateItemPrice(item)?.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </p>
-                    {item.discount > 0 && item.sale_price ? (
-                      <p className="text-xs text-surface/40 line-through">R$ {item.sale_price.toLocaleString('pt-BR')}</p>
+                    {item.discount > 0 ? (
+                      <p className="text-xs text-surface/40 line-through">R$ {(item.sale_price ?? item.price ?? 0).toLocaleString('pt-BR')}</p>
                     ) : null}
                   </div>
                 </Link>
@@ -164,19 +188,17 @@ export default function Acessorios() {
                 <button 
                   onClick={() => addItem(productToCartItem(
                     item,
-                    item.discount > 0
-                      ? (item.discounted_price ?? (item.sale_price ? item.sale_price * (1 - item.discount / 100) : item.sale_price))
-                      : item.sale_price
+                    calculateItemPrice(item)
                   ))}
-                  disabled={item.stock <= 0}
+                  disabled={(item.stock ?? 1) <= 0}
                   className={`w-full inline-flex items-center justify-center gap-2 px-6 py-4 rounded-full text-sm font-bold uppercase tracking-[0.2em] transition-all duration-200 ${
-                    item.stock > 0
+                    (item.stock ?? 1) > 0
                       ? 'bg-secondary text-primary hover:bg-secondary/90 active:scale-95 shadow-2xl shadow-secondary/20'
                       : 'bg-surface/10 text-surface/40 cursor-not-allowed'
                   }`}
                 >
                   <span className="material-symbols-outlined">shopping_cart</span>
-                  {item.stock > 0 ? 'Adicionar à Sacola' : 'Esgotado'}
+                  {(item.stock ?? 1) > 0 ? 'Adicionar à Sacola' : 'Esgotado'}
                 </button>
               </div>
             </div>

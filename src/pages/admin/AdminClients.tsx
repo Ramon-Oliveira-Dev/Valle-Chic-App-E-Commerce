@@ -2,7 +2,8 @@ import { Link } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import Sidebar from '../../components/Sidebar';
 import BottomNavigation from '../../components/BottomNavigation';
-import { supabase } from '../../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { api } from '../../services/api';
 import { toast } from 'sonner';
 import NotificationModal from '../../components/NotificationModal';
 import NotificationSino from '../../components/NotificationSino';
@@ -28,7 +29,10 @@ import {
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
+import { useTheme } from '../../contexts/ThemeContext';
+
 export default function AdminClients() {
+  const { isDesktopSidebarCollapsed } = useTheme();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [clients, setClients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -56,55 +60,66 @@ export default function AdminClients() {
   const fetchClients = async () => {
     try {
       setLoading(true);
-      let query = supabase
-        .from('clients')
-        .select('*', { count: 'exact' });
+      if (isSupabaseConfigured) {
+        try {
+          let query = supabase
+            .from('clients')
+            .select('*', { count: 'exact' });
 
-      if (searchTerm) {
-        query = query.ilike('name', `%${searchTerm}%`);
+          if (searchTerm) {
+            query = query.ilike('name', `%${searchTerm}%`);
+          }
+
+          const { data, error, count } = await query
+            .order('name')
+            .range((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage - 1);
+
+          if (!error && data && data.length > 0) {
+            // 1. Buscar vendas para processar Funil e Contador
+            const clientIds = data.map(c => c.id);
+            const { data: salesData } = await supabase
+              .from('sales')
+              .select('client_id, total_amount, amount_paid, status, sale_date')
+              .in('client_id', clientIds)
+              .order('sale_date', { ascending: false });
+
+            const clientsWithStats = data.map(client => {
+              const clientSales = salesData?.filter(s => s.client_id === client.id) || [];
+              const totalOwed = clientSales.reduce((acc, curr) => acc + (curr.total_amount - (curr.amount_paid || 0)), 0);
+              const completedPurchases = clientSales.filter(s => s.status === 'concluido').length;
+              const latestOrder = clientSales.length > 0 ? clientSales[0] : null;
+
+              return { 
+                ...client, 
+                totalOwed, 
+                completedPurchases,
+                latestOrder 
+              };
+            });
+
+            setClients(clientsWithStats);
+            setTotalCount(count || clientsWithStats.length);
+            return;
+          }
+        } catch {
+          // Fallback below
+        }
       }
 
-      const { data, error, count } = await query
-        .order('name')
-        .range((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage - 1);
-
-      if (error) throw error;
-
-      // 1. Buscar vendas para processar Funil e Contador
-      const clientIds = data?.map(c => c.id) || [];
-      const { data: salesData, error: salesError } = await supabase
-        .from('sales')
-        .select('client_id, total_amount, amount_paid, status, sale_date')
-        .in('client_id', clientIds)
-        .order('sale_date', { ascending: false });
-
-      if (salesError) throw salesError;
-
-      const clientsWithStats = data?.map(client => {
-        const clientSales = salesData?.filter(s => s.client_id === client.id) || [];
-        
-        // Lógica Financeiro (Crediário)
-        const totalOwed = clientSales.reduce((acc, curr) => acc + (curr.total_amount - (curr.amount_paid || 0)), 0);
-        
-        // Lógica Contador (Apenas concluídas)
-        const completedPurchases = clientSales.filter(s => s.status === 'concluido').length;
-        
-        // Lógica Funil (Status do último pedido)
-        const latestOrder = clientSales.length > 0 ? clientSales[0] : null;
-
-        return { 
-          ...client, 
-          totalOwed, 
-          completedPurchases,
-          latestOrder 
-        };
-      }) || [];
-
-      setClients(clientsWithStats);
-      setTotalCount(count || 0);
+      // Local fallback
+      const fallbackList = await api.clients.getAll();
+      let filtered = [...fallbackList];
+      if (searchTerm) {
+        const lower = searchTerm.toLowerCase();
+        filtered = filtered.filter(c => c.name?.toLowerCase().includes(lower));
+      }
+      setClients(filtered);
+      setTotalCount(filtered.length);
     } catch (error) {
-      console.error('Error:', error);
-      toast.error('Erro ao carregar clientes.');
+      console.error('Error fetching clients:', error);
+      const fallbackList = await api.clients.getAll();
+      setClients(fallbackList || []);
+      setTotalCount(fallbackList?.length || 0);
     } finally {
       setLoading(false);
     }
@@ -134,10 +149,9 @@ export default function AdminClients() {
       type: 'warning',
       onConfirm: async () => {
         try {
-          const { error } = await supabase.from('clients').delete().eq('id', id);
-          if (error) throw error;
+          await api.clients.delete(id);
           fetchClients();
-          toast.success('Cliente removida.');
+          toast.success('Cliente removida com sucesso!');
         } catch (error) {
           toast.error('Erro ao remover cliente.');
         }
@@ -149,21 +163,29 @@ export default function AdminClients() {
     <div className="min-h-screen global-bg text-surface font-body flex flex-col">
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
-      <main className="flex-1 min-w-0 pb-28">
-        <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 bar-fume mb-10">
+      <main className={`flex-1 min-w-0 pb-28 ${isDesktopSidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-[240px]'} transition-all duration-300`}>
+        <header className={`fixed top-0 left-0 right-0 ${isDesktopSidebarCollapsed ? 'lg:left-[76px]' : 'lg:left-[240px]'} z-30 flex items-center justify-between px-6 py-4 bar-fume mb-10 transition-all duration-300`}>
           <div className="flex items-center gap-4">
-            <MenuButton onClick={() => setIsSidebarOpen(true)} />
-            <h2 className="font-headline text-2xl italic">Admin <span className="text-secondary italic ml-1">VC</span></h2>
+            <div className="lg:hidden">
+              <MenuButton onClick={() => setIsSidebarOpen(true)} />
+            </div>
           </div>
           <NotificationSino />
         </header>
 
-        <div className="px-5 md:px-10 max-w-7xl mx-auto pt-24">
+        <div className="px-6 lg:px-10 max-w-[1600px] mx-auto pt-24">
           {/* Header Superior */}
           <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-6">
             <div>
-              <h2 className="font-headline text-4xl italic mb-1 uppercase text-surface">Gestão de Clientes <span className="text-secondary italic">VIP</span></h2>
-              <p className="text-surface/40 text-[10px] uppercase tracking-[0.3em] font-black">Fidelização & Crediário Valle Chic</p>
+              <div className="flex items-center gap-2">
+                <h2 className="font-headline text-3xl italic tracking-tight">Clientes <span className="text-secondary">VC</span></h2>
+                <span className="px-2.5 py-0.5 rounded-full bg-secondary/10 border border-secondary/20 text-secondary text-[11px] font-bold">
+                  {totalCount} clientes
+                </span>
+              </div>
+              <p className="text-surface/40 text-[10px] uppercase tracking-[0.2em] font-bold mt-1">
+                Gestão de clientes, histórico de compras e status de pagamento
+              </p>
             </div>
             <Link 
               to="/admin/clients/new" 
@@ -192,7 +214,7 @@ export default function AdminClients() {
                 <div className="py-24 text-center animate-pulse text-surface/20 uppercase tracking-widest text-xs">Sincronizando Base de Dados...</div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
+                  <table className="w-full text-left border-collapse min-w-[850px]">
                     <thead>
                       <tr className="bg-white/[0.02] border-b border-white/5">
                         <th className="px-8 py-6 text-[10px] uppercase tracking-widest text-surface/30 font-black">Cliente</th>

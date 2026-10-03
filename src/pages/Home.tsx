@@ -1,12 +1,15 @@
 import { Link, useNavigate } from 'react-router-dom';
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useCartStore } from '../store/cartStore';
-import { supabase } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { getFallbackProducts, getFallbackKits } from '../data/products';
 import BottomNavigation from '../components/BottomNavigation';
 import Sidebar from '../components/Sidebar';
 import ProductImage from '../components/ProductImage';
 import { productToCartItem } from '../lib/productMetadata';
 import { toast } from 'sonner';
+
+import { useTheme } from '../contexts/ThemeContext';
 
 const normalizeCategory = (category?: string | null) =>
   category?.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim() || '';
@@ -16,6 +19,7 @@ const normalizeText = (text: string = '') =>
 
 export default function Home() {
   const navigate = useNavigate();
+  const { isDesktopSidebarCollapsed } = useTheme();
   const autoCarouselRef = useRef<HTMLDivElement>(null);
   const manualCarouselRef = useRef<HTMLDivElement>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -26,7 +30,7 @@ export default function Home() {
   const [featuredProducts, setFeaturedProducts] = useState<any[]>([]);
   const [kits, setKits] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [availableCategories, setAvailableCategories] = useState<Set<string>>(new Set(['bolsas']));
+  const [availableCategories, setAvailableCategories] = useState<Set<string>>(new Set(['bolsas', 'maletas', 'carteiras', 'acessorios']));
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [showSearchResults, setShowSearchResults] = useState(false);
@@ -42,41 +46,63 @@ export default function Home() {
     try {
       setLoading(true);
       
-      const { data: catData } = await supabase
-        .from('products')
-        .select('category')
-        .eq('published', true)
-        .gt('stock', 0);
-      
-      if (catData) {
-        const cats = new Set(catData.map(p => normalizeCategory(p.category)));
-        setAvailableCategories(cats);
+      let fetchedCats: Set<string> | null = null;
+      let fetchedFeatured: any[] | null = null;
+      let fetchedKitsList: any[] | null = null;
+
+      if (isSupabaseConfigured) {
+        try {
+          const { data: catData } = await supabase
+            .from('products')
+            .select('category')
+            .eq('published', true)
+            .gt('stock', 0);
+          
+          if (catData && catData.length > 0) {
+            fetchedCats = new Set(catData.map(p => normalizeCategory(p.category)));
+          }
+
+          const { data: featured, error: featuredError } = await supabase
+            .from('products')
+            .select('*')
+            .eq('published', true)
+            .eq('featured', true)
+            .gt('stock', 0)
+            .limit(10);
+
+          if (!featuredError && featured && featured.length > 0) {
+            fetchedFeatured = featured;
+          }
+
+          const { data: kitsData, error: kitsError } = await supabase
+            .from('products')
+            .select('*')
+            .eq('published', true)
+            .eq('is_kit', true)
+            .eq('featured', true)
+            .gt('stock', 0)
+            .limit(5);
+
+          if (!kitsError && kitsData && kitsData.length > 0) {
+            fetchedKitsList = kitsData;
+          }
+        } catch (supabaseError) {
+          console.warn('Supabase not available or returned error, using fallback catalog data.', supabaseError);
+        }
       }
 
-      const { data: featured, error: featuredError } = await supabase
-        .from('products')
-        .select('*')
-        .eq('published', true)
-        .eq('featured', true)
-        .gt('stock', 0)
-        .limit(10);
+      const fallbackProds = getFallbackProducts();
+      const fallbackKits = getFallbackKits();
 
-      if (featuredError) throw featuredError;
-      setFeaturedProducts(featured || []);
-
-      const { data: kitsData, error: kitsError } = await supabase
-        .from('products')
-        .select('*')
-        .eq('published', true)
-        .eq('is_kit', true)
-        .eq('featured', true)
-        .gt('stock', 0)
-        .limit(5);
-
-      if (!kitsError) setKits(kitsData || []);
+      setAvailableCategories(fetchedCats || new Set(fallbackProds.map(p => normalizeCategory(p.category))));
+      setFeaturedProducts(fetchedFeatured || fallbackProds.filter(p => p.featured && !p.is_kit));
+      setKits(fetchedKitsList || fallbackKits);
 
     } catch (error) {
-      console.error('Error fetching home data:', error);
+      console.warn('Error fetching home data, using local catalog:', error);
+      const fallbackProds = getFallbackProducts();
+      setFeaturedProducts(fallbackProds.filter(p => p.featured && !p.is_kit));
+      setKits(getFallbackKits());
     } finally {
       setLoading(false);
     }
@@ -121,7 +147,7 @@ export default function Home() {
     return '';
   };
 
-  const getFinalPrice = (price: number, discount: number) => {
+  const getFinalPrice = (price?: number, discount?: number) => {
     const p = Number(price) || 0;
     const d = Number(discount) || 0;
     return d > 0 ? p - (p * (d / 100)) : p;
@@ -145,22 +171,34 @@ export default function Home() {
     searchTimeoutRef.current = setTimeout(async () => {
       try {
         const normalizedQuery = normalizeText(query);
+        let dataToSearch: any[] = [];
         
-        const { data, error } = await supabase
-          .from('products')
-          .select('*')
-          .eq('published', true)
-          .gt('stock', 0)
-          .limit(10);
+        if (isSupabaseConfigured) {
+          try {
+            const { data, error } = await supabase
+              .from('products')
+              .select('*')
+              .eq('published', true)
+              .gt('stock', 0)
+              .limit(15);
+            if (!error && data && data.length > 0) {
+              dataToSearch = data;
+            }
+          } catch {
+            dataToSearch = getFallbackProducts();
+          }
+        }
+        
+        if (dataToSearch.length === 0) {
+          dataToSearch = getFallbackProducts();
+        }
 
-        if (error) throw error;
-
-        const filtered = (data || [])
+        const filtered = dataToSearch
           .filter(product => {
             const productName = normalizeText(product.name);
-            const productBrand = normalizeText(product.brand);
-            const productCategory = normalizeText(product.category);
-            const productDescription = normalizeText(product.description);
+            const productBrand = normalizeText(product.brand || '');
+            const productCategory = normalizeText(product.category || '');
+            const productDescription = normalizeText(product.description || '');
 
             return (
               productName.includes(normalizedQuery) ||
@@ -179,7 +217,7 @@ export default function Home() {
         setSearchResults(filtered);
         setShowSearchResults(true);
       } catch (error) {
-        console.error('Erro ao buscar produtos:', error);
+        console.warn('Erro ao buscar produtos:', error);
         setSearchResults([]);
       } finally {
         setIsSearching(false);
@@ -198,26 +236,25 @@ export default function Home() {
     e.preventDefault();
     e.stopPropagation();
     
-    const finalPrice = getFinalPrice(product.sale_price, product.discount);
+    const price = product.sale_price ?? product.price ?? 0;
+    const finalPrice = getFinalPrice(price, product.discount);
     addItem(productToCartItem(product, finalPrice));
     toast.success(`${product.name} adicionado ao carrinho!`);
   };
 
   return (
-    <div className="global-bg text-surface font-body selection:bg-secondary/30 min-h-screen">
+    <div className={`global-bg text-surface font-body selection:bg-secondary/30 min-h-screen ${isDesktopSidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-[240px]'} transition-all duration-300`}>
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
       
-      <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 bar-fume">
-        <button 
-          onClick={() => setIsSidebarOpen(true)}
-          className="w-10 h-10 rounded-full border border-secondary/20 overflow-hidden flex items-center justify-center bg-primary active:scale-90 transition-transform"
-        >
-          <span className="material-symbols-outlined text-secondary text-xl">menu</span>
-        </button>
-        <h1 className="font-headline text-2xl font-bold tracking-tighter text-stone-100 flex items-center gap-0.5">
-          <span className="material-symbols-outlined text-xl text-secondary" style={{ fontVariationSettings: "'FILL' 1" }}>favorite</span>
-          <span className="uppercase">vc</span>
-        </h1>
+      <header className={`fixed top-0 left-0 right-0 ${isDesktopSidebarCollapsed ? 'lg:left-[76px]' : 'lg:left-[240px]'} z-50 flex items-center justify-between px-6 py-4 bar-fume transition-all duration-300 border-b border-white/5`}>
+        <div className="flex items-center gap-4">
+          <button 
+            onClick={() => setIsSidebarOpen(true)}
+            className="lg:hidden w-10 h-10 rounded-full border border-secondary/20 overflow-hidden flex items-center justify-center bg-primary active:scale-90 transition-transform"
+          >
+            <span className="material-symbols-outlined text-secondary text-xl">menu</span>
+          </button>
+        </div>
         <Link to="/checkout" className="text-surface hover:opacity-80 transition-opacity active:scale-95 duration-150 ease-in-out relative">
           <div className="relative">
             <span className="material-symbols-outlined">shopping_cart</span>
@@ -230,39 +267,35 @@ export default function Home() {
         </Link>
       </header>
 
-      <main className="pb-24 editorial-gradient min-h-screen max-w-5xl mx-auto pt-24">
-        {/* Banner */}
-        <section className="px-4 pt-4">
-          <div className="relative aspect-3/4.5 sm:aspect-video md:aspect-21/9 w-full rounded-2xl overflow-hidden group shadow-2xl border border-white/5">
-            <img 
-              className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105" 
-              alt="A Nova Coleção 2026" 
-              src="https://lh3.googleusercontent.com/aida-public/AB6AXuDlDxC3H4NbgCyenQONl6hvhc0_EWPHLUgeiYFbdDGqUHgdQ2e2TtAuTdwdSP_61fLL4HDUmgpljYk16nLuEp6lZIQNuEVxzrwABBNQmDgdNcy7y1bv3q2e6i43l7l82o2zgyESpzM07R4IJ_WK-_csyzhfW-G4J8AA0v3619PIQAi3KFeS2oQFKv0H5L9lVSqRAl9HgzX9MfszU_kywKF3iTE6t8M2puL6BMHxlcy7zqff14cQRsP6wTdSFW7cmUTJQLNEqVYR5yg"
-            />
-            <div className="absolute inset-0 bg-linear-to-t from-[#0b0c10] via-[#0b0c10]/30 to-transparent"></div>
-            <div className="absolute bottom-8 left-8 right-8">
-              <h2 className="font-headline italic text-4xl text-surface leading-tight drop-shadow-md">A Nova Coleção 2026</h2>
-            </div>
+      <main className="pb-24 editorial-gradient min-h-screen max-w-5xl mx-auto pt-24 space-y-12">
+        {/* Premium Editorial Title Block */}
+        <section className="px-6 pt-4 animate-fade-in">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[9px] uppercase tracking-[0.4em] font-black text-secondary/70">Coleção Premium 2026</span>
+            <h1 className="font-serif italic font-black text-4xl sm:text-5xl text-white tracking-tight leading-none mt-1">
+              Valle <span className="text-secondary">Chic</span>
+            </h1>
+            <p className="text-[10px] text-surface/40 tracking-[0.2em] uppercase mt-1.5">Sua dose diária de elegância e luxo</p>
           </div>
         </section>
 
-        {/* Busca */}
-        <section className="px-6 my-8">
-          <div className="relative group">
-            <span className="absolute left-5 top-1/2 -translate-y-1/2 material-symbols-outlined text-secondary/40 text-xl transition-colors group-focus-within:text-secondary">search</span>
+        {/* Busca - Sleek Glassmorphism Input */}
+        <section className="px-6 my-2">
+          <div className="relative group max-w-2xl mx-auto">
+            <span className="absolute left-5 top-1/2 -translate-y-1/2 material-symbols-outlined text-secondary/50 text-xl transition-colors group-focus-within:text-secondary">search</span>
             <input 
               value={searchQuery}
               onChange={(e) => handleSearch(e.target.value)}
               onFocus={() => searchQuery.length >= 2 && setShowSearchResults(true)}
               onBlur={() => setTimeout(() => setShowSearchResults(false), 200)}
-              className="w-full bg-[#1A1C23] border border-white/5 rounded-full py-4 pl-14 pr-6 text-sm text-surface placeholder:text-surface/40 focus:outline-none focus:border-secondary/50 focus:bg-[#1A1C23] transition-all shadow-inner" 
-              placeholder="Qual estilo você procura?" 
+              className="w-full bg-[#111622] border border-white/5 rounded-full py-4 pl-14 pr-6 text-sm text-surface placeholder:text-surface/30 focus:outline-none focus:border-secondary/40 focus:bg-[#111622] transition-all duration-300 shadow-2xl shadow-black/40" 
+              placeholder="Qual estilo você procura hoje?" 
               type="text"
             />
             
             {/* Dropdown de Resultados */}
             {showSearchResults && (searchResults.length > 0 || isSearching) && (
-              <div className="absolute top-full left-0 right-0 mt-2 bg-[#1A1C23] border border-secondary/30 rounded-2xl shadow-2xl z-50 max-h-96 overflow-y-auto custom-scrollbar">
+              <div className="absolute top-full left-0 right-0 mt-2 bg-[#161D2F] border border-secondary/30 rounded-2xl shadow-2xl z-50 max-h-96 overflow-y-auto custom-scrollbar">
                 {isSearching ? (
                   <div className="p-4 flex items-center justify-center gap-2">
                     <div className="w-3 h-3 rounded-full border-2 border-secondary/40 border-t-secondary animate-spin"></div>
@@ -308,38 +341,55 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Categorias */}
-        <section className="mb-12">
-          <div className="flex overflow-x-auto no-scrollbar gap-6 px-6 md:justify-center">
-            <Link to="/catalog" className="flex flex-col items-center gap-3 min-w-17.5 group">
-              <div className="w-16 h-16 rounded-full bg-secondary/10 flex items-center justify-center border border-secondary/20 group-hover:bg-secondary/20 transition-colors shadow-lg">
-                <span className="material-symbols-outlined text-secondary text-2xl">shopping_bag</span>
+        {/* Banner */}
+        <section className="px-4">
+          <div className="relative aspect-3/4.5 sm:aspect-video md:aspect-21/9 w-full rounded-2xl sm:rounded-[32px] overflow-hidden group shadow-2xl border border-white/5">
+            <img 
+              className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105" 
+              alt="A Nova Coleção 2026" 
+              src="https://images.unsplash.com/photo-1490481651871-ab68de25d43d?auto=format&fit=crop&w=1600&q=80"
+              referrerPolicy="no-referrer"
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-[#060d1a] via-[#060d1a]/20 to-transparent"></div>
+            <div className="absolute bottom-8 left-8 right-8">
+              <span className="text-[9px] uppercase tracking-[0.3em] font-black text-secondary">Novo Lançamento</span>
+              <h2 className="font-serif italic text-3xl sm:text-4xl text-white leading-tight drop-shadow-md mt-1">A Nova Coleção 2026</h2>
+            </div>
+          </div>
+        </section>
+
+        {/* Categorias - Highly Polished & Tactile Row */}
+        <section className="mb-4">
+          <div className="flex overflow-x-auto no-scrollbar gap-6 px-6 justify-start md:justify-center">
+            <Link to="/catalog" className="flex flex-col items-center gap-2.5 min-w-[72px] group">
+              <div className="w-16 h-16 rounded-full bg-secondary/15 flex items-center justify-center border border-secondary/35 group-hover:bg-secondary/25 transition-all duration-300 shadow-[0_0_15px_rgba(244,192,37,0.15)] active:scale-95">
+                <span className="material-symbols-outlined text-secondary text-2xl font-light">shopping_bag</span>
               </div>
-              <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-surface/80 group-hover:text-secondary transition-colors">Bolsas</span>
+              <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-surface group-hover:text-secondary transition-colors">Bolsas</span>
             </Link>
             
             {availableCategories.has('maletas') && (
-              <Link to="/maletas" className="flex flex-col items-center gap-3 min-w-17.5 group">
-                <div className="w-16 h-16 rounded-full bg-[#1A1C23] flex items-center justify-center border border-white/5 group-hover:border-white/20 transition-colors shadow-lg">
-                  <span className="material-symbols-outlined text-surface/60 text-2xl group-hover:text-surface transition-colors">business_center</span>
+              <Link to="/maletas" className="flex flex-col items-center gap-2.5 min-w-[72px] group">
+                <div className="w-16 h-16 rounded-full bg-[#111622]/90 flex items-center justify-center border border-white/5 group-hover:border-secondary/20 group-hover:bg-[#111622] transition-all duration-300 shadow-md active:scale-95">
+                  <span className="material-symbols-outlined text-surface/60 text-2xl font-light group-hover:text-secondary transition-colors">business_center</span>
                 </div>
                 <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-surface/50 group-hover:text-surface transition-colors">Maletas</span>
               </Link>
             )}
 
             {availableCategories.has('carteiras') && (
-              <Link to="/carteiras" className="flex flex-col items-center gap-3 min-w-17.5 group">
-                <div className="w-16 h-16 rounded-full bg-[#1A1C23] flex items-center justify-center border border-white/5 group-hover:border-white/20 transition-colors shadow-lg">
-                  <span className="material-symbols-outlined text-surface/60 text-2xl group-hover:text-surface transition-colors">wallet</span>
+              <Link to="/carteiras" className="flex flex-col items-center gap-2.5 min-w-[72px] group">
+                <div className="w-16 h-16 rounded-full bg-[#111622]/90 flex items-center justify-center border border-white/5 group-hover:border-secondary/20 group-hover:bg-[#111622] transition-all duration-300 shadow-md active:scale-95">
+                  <span className="material-symbols-outlined text-surface/60 text-2xl font-light group-hover:text-secondary transition-colors">wallet</span>
                 </div>
                 <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-surface/50 group-hover:text-surface transition-colors">Carteiras</span>
               </Link>
             )}
 
             {availableCategories.has('acessorios') && (
-              <Link to="/acessorios" className="flex flex-col items-center gap-3 min-w-17.5 group">
-                <div className="w-16 h-16 rounded-full bg-[#1A1C23] flex items-center justify-center border border-white/5 group-hover:border-white/20 transition-colors shadow-lg">
-                  <span className="material-symbols-outlined text-surface/60 text-2xl group-hover:text-surface transition-colors">styler</span>
+              <Link to="/acessorios" className="flex flex-col items-center gap-2.5 min-w-[72px] group">
+                <div className="w-16 h-16 rounded-full bg-[#111622]/90 flex items-center justify-center border border-white/5 group-hover:border-secondary/20 group-hover:bg-[#111622] transition-all duration-300 shadow-md active:scale-95">
+                  <span className="material-symbols-outlined text-surface/60 text-2xl font-light group-hover:text-secondary transition-colors">styler</span>
                 </div>
                 <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-surface/50 group-hover:text-surface transition-colors">Acessórios</span>
               </Link>
@@ -348,9 +398,12 @@ export default function Home() {
         </section>
 
         {/* 🌟 KITS EXCLUSIVOS 🌟 */}
-        <section className="mb-12">
-          <div className="px-6 flex justify-between items-baseline mb-6">
-            <h4 className="font-headline text-2xl text-surface">Kits Exclusivos</h4>
+        <section className="mb-4">
+          <div className="px-6 flex justify-between items-baseline mb-5">
+            <div>
+              <span className="text-[8px] uppercase tracking-[0.3em] font-black text-secondary/80">Seleções Combinadas</span>
+              <h4 className="font-headline text-2xl text-white font-black italic">Kits Exclusivos</h4>
+            </div>
             <Link to="/catalog" className="text-[10px] uppercase tracking-[0.15em] text-secondary font-bold hover:opacity-80 transition-opacity">Descobrir</Link>
           </div>
           <div ref={autoCarouselRef} className="flex overflow-x-auto no-scrollbar gap-4 px-6 pb-4 snap-x snap-mandatory">
@@ -369,7 +422,7 @@ export default function Home() {
                     referrerPolicy="no-referrer"
                   />
                   {/* Gradiente para a leitura do texto */}
-                  <div className="absolute inset-x-0 bottom-0 h-[60%] bg-linear-to-t from-[#0b0c10]/90 to-transparent pointer-events-none" />
+                  <div className="absolute inset-x-0 bottom-0 h-[60%] bg-gradient-to-t from-[#060d1a]/95 to-transparent pointer-events-none" />
                 </Link>
 
                 {/* Etiquetas Superiores */}
@@ -381,12 +434,12 @@ export default function Home() {
 
                 {/* Textos Inferiores com Desconto Integrado */}
                 <div className="absolute bottom-5 left-5 right-20 flex flex-col pointer-events-none z-10">
-                  <h5 className="text-lg font-headline text-surface leading-tight drop-shadow-md mb-1">{kit.name}</h5>
+                  <h5 className="text-lg font-headline text-white font-bold leading-tight drop-shadow-md mb-1">{kit.name}</h5>
                   <div className="flex flex-col gap-1">
                     {kit.discount > 0 && (
                       <div className="flex items-center gap-2">
-                        <span className="text-xs text-surface/60 line-through drop-shadow-md">
-                          R$ {kit.sale_price?.toLocaleString('pt-BR')}
+                        <span className="text-xs text-white/55 line-through drop-shadow-md">
+                          R$ {(kit.sale_price ?? kit.price ?? 0).toLocaleString('pt-BR')}
                         </span>
                         <span className="bg-[#b3192b] text-white px-2 py-0.5 text-[9px] font-bold tracking-wider uppercase rounded shadow-sm">
                           -{kit.discount}% OFF
@@ -394,7 +447,7 @@ export default function Home() {
                       </div>
                     )}
                     <span className="text-secondary font-headline text-xl drop-shadow-md">
-                      R$ {getFinalPrice(kit.sale_price, kit.discount).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      R$ {getFinalPrice(kit.sale_price ?? kit.price, kit.discount).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   </div>
                 </div>
@@ -414,46 +467,42 @@ export default function Home() {
           </div>
         </section>
 
-        {/* 🌟 SELECIONADOS PARA VOCÊ 🌟 */}
-        <section className="mb-12">
-          <div className="px-6 flex justify-between items-baseline mb-6">
-            <h4 className="font-headline text-2xl text-surface">Selecionados para você</h4>
+        {/* 🌟 SELECIONADOS PARA VOCÊ 🌟 - Modern Grid System */}
+        <section className="mb-4">
+          <div className="px-6 flex justify-between items-baseline mb-5">
+            <div>
+              <span className="text-[8px] uppercase tracking-[0.3em] font-black text-secondary/80">Recomendações Especiais</span>
+              <h4 className="font-headline text-2xl text-white font-black italic">Selecionados para você</h4>
+            </div>
             <Link to="/catalog" className="text-[10px] uppercase tracking-[0.15em] text-secondary font-bold hover:opacity-80 transition-opacity">Ver Tudo</Link>
           </div>
-          <div 
-            ref={manualCarouselRef}
-            onMouseDown={handleMouseDown}
-            onMouseLeave={handleMouseLeave}
-            onMouseUp={handleMouseUp}
-            onMouseMove={handleMouseMove}
-            className={`flex overflow-x-auto no-scrollbar gap-4 px-6 pb-8 ${isDragging ? 'cursor-grabbing select-none' : 'cursor-grab'}`}
-          >
+          
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 px-6 pb-8">
             {loading ? (
               Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="w-[45vw] sm:w-40 flex flex-col gap-2 shrink-0 animate-pulse">
+                <div key={i} className="flex flex-col gap-2 shrink-0 animate-pulse">
                   <div className="w-full aspect-4/5 bg-white/5 rounded-2xl"></div>
                   <div className="w-full h-16 bg-white/5 rounded mt-2"></div>
                 </div>
               ))
             ) : featuredProducts.map((product) => (
               
-              /* Contentor Pai (Flex Column) para os cards terem sempre a mesma altura e empurrarem o preço para baixo */
-              <div key={product.id} className="w-[45vw] sm:w-40 md:w-45 shrink-0 flex flex-col rounded-2xl overflow-hidden bg-[#1A1C23] border border-white/5 shadow-lg group hover:border-white/10 transition-colors">
+              <div key={product.id} className="w-full flex flex-col rounded-2xl overflow-hidden bg-[#111622]/90 border border-white/5 shadow-xl group hover:border-secondary/20 hover:-translate-y-1 hover:shadow-2xl transition-all duration-300">
                 
-                {/* 1. CAIXA DA IMAGEM: A preencher a caixa (object-cover) com fundo branco */}
-                <div className="relative w-full aspect-4/5 bg-white">
+                {/* 1. CAIXA DA IMAGEM: A preencher a caixa (object-cover) com fundo branco para contrastar o produto */}
+                <div className="relative w-full aspect-4/5 bg-white flex items-center justify-center overflow-hidden">
                   <Link to={`/product/${product.id}`} className="absolute inset-0">
                     <ProductImage 
                       className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" 
                       alt={product.name} 
-                      src={product.image_url || product.img || 'https://picsum.photos/seed/product/400/500'}
+                      src={product.image_url || product.img || product.image || 'https://picsum.photos/seed/product/400/500'}
                       referrerPolicy="no-referrer"
                     />
                   </Link>
                 </div>
                 
-                {/* 2. CAIXA DE TEXTO E AÇÕES: Flex-Grow para ocupar todo o espaço restante e empurrar o fundo */}
-                <div className="p-3 flex flex-col grow justify-between">
+                {/* 2. CAIXA DE TEXTO E AÇÕES: Flex-Grow para ocupar todo o espaço restante */}
+                <div className="p-3 flex flex-col grow justify-between bg-[#111622]/95">
                   
                   {/* Topo do Texto: Marca, Cor e Nome */}
                   <div>
@@ -469,7 +518,7 @@ export default function Home() {
                     </div>
                     
                     <Link to={`/product/${product.id}`} className="block mb-2">
-                      <h5 className="text-sm text-surface/90 font-medium tracking-tight hover:text-secondary transition-colors line-clamp-2 leading-snug">
+                      <h5 className="text-sm text-white/90 font-medium tracking-tight hover:text-secondary transition-colors line-clamp-2 leading-snug">
                         {product.name}
                       </h5>
                     </Link>
@@ -480,16 +529,16 @@ export default function Home() {
                     <Link to={`/product/${product.id}`} className="flex flex-col gap-0.5">
                       {product.discount > 0 && (
                         <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] text-surface/40 line-through">
-                            R$ {product.sale_price?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          <span className="text-[10px] text-white/40 line-through">
+                            R$ {(product.sale_price ?? product.price ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                           </span>
                           <span className="bg-[#b3192b] text-white px-1.5 py-0.5 text-[8px] font-bold uppercase rounded shadow-sm">
-                            -{product.discount}% OFF
+                            -{product.discount}%
                           </span>
                         </div>
                       )}
                       <span className="text-secondary font-headline italic text-[15px] leading-none mt-1">
-                        R$ {getFinalPrice(product.sale_price, product.discount).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        R$ {getFinalPrice(product.sale_price ?? product.price, product.discount).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
                     </Link>
 

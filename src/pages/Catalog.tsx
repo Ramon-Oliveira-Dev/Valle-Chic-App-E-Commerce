@@ -1,21 +1,25 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { useCartStore } from '../store/cartStore';
-import { supabase } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { getFallbackProducts } from '../data/products';
 import BottomNavigation from '../components/BottomNavigation';
 import Sidebar from '../components/Sidebar';
 import ProductImage from '../components/ProductImage';
 import { productToCartItem } from '../lib/productMetadata';
+
+import { useTheme } from '../contexts/ThemeContext';
 
 const normalizeCategory = (category?: string | null) =>
   category?.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim() || '';
 
 export default function Catalog() {
   const navigate = useNavigate();
+  const { isDesktopSidebarCollapsed } = useTheme();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [availableCategories, setAvailableCategories] = useState<Set<string>>(new Set(['bolsas']));
+  const [availableCategories, setAvailableCategories] = useState<Set<string>>(new Set(['bolsas', 'maletas', 'carteiras', 'acessorios']));
   const addItem = useCartStore((state) => state.addItem);
   const totalItems = useCartStore((state) => state.getTotalItems());
 
@@ -26,32 +30,54 @@ export default function Catalog() {
   const fetchProducts = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('products')
-        .select('*')
-        .eq('published', true)
-        .gt('stock', 0)
-        .order('created_at', { ascending: false });
+      let loadedData: any[] | null = null;
+      let loadedCats: Set<string> | null = null;
 
-      if (error) throw error;
-      setProducts(data || []);
-      
-      if (data) {
-        const cats = new Set(data.map(p => normalizeCategory(p.category)));
-        setAvailableCategories(cats);
+      if (isSupabaseConfigured) {
+        try {
+          const { data, error } = await supabase
+            .from('products')
+            .select('*')
+            .eq('published', true)
+            .gt('stock', 0)
+            .order('created_at', { ascending: false });
+
+          if (!error && data && data.length > 0) {
+            loadedData = data;
+            loadedCats = new Set(data.map(p => normalizeCategory(p.category)));
+          }
+        } catch (supabaseError) {
+          console.warn('Supabase not available, using fallback catalog data.', supabaseError);
+        }
       }
+
+      const fallback = getFallbackProducts();
+      setProducts(loadedData || fallback);
+      setAvailableCategories(loadedCats || new Set(fallback.map(p => normalizeCategory(p.category))));
     } catch (error) {
-      console.error('Error fetching products:', error);
+      console.warn('Error fetching products, using local catalog:', error);
+      const fallback = getFallbackProducts();
+      setProducts(fallback);
+      setAvailableCategories(new Set(fallback.map(p => normalizeCategory(p.category))));
     } finally {
       setLoading(false);
     }
   };
 
+  const calculateProductPrice = (product: any) => {
+    const basePrice = product.sale_price ?? product.price ?? 0;
+    const discount = product.discount || 0;
+    if (discount > 0) {
+      return product.discounted_price ?? (basePrice * (1 - discount / 100));
+    }
+    return basePrice;
+  };
+
   return (
-    <div className="global-bg text-surface font-body selection:bg-secondary/30 min-h-screen flex flex-col">
+    <div className={`global-bg text-surface font-body selection:bg-secondary/30 min-h-screen flex flex-col ${isDesktopSidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-[240px]'} transition-all duration-300`}>
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
       
-      <header className="fixed top-0 w-full z-50 flex items-center justify-between px-6 py-4 bar-fume">
+      <header className={`fixed top-0 left-0 right-0 ${isDesktopSidebarCollapsed ? 'lg:left-[76px]' : 'lg:left-[240px]'} z-50 flex items-center justify-between px-6 py-4 bar-fume transition-all duration-300 border-b border-white/5`}>
         <div className="flex items-center gap-4">
           <button 
             onClick={() => navigate(-1)}
@@ -61,15 +87,11 @@ export default function Catalog() {
           </button>
           <button 
             onClick={() => setIsSidebarOpen(true)}
-            className="w-10 h-10 rounded-full border border-secondary/20 overflow-hidden flex items-center justify-center bg-primary active:scale-90 transition-transform"
+            className="lg:hidden w-10 h-10 rounded-full border border-secondary/20 overflow-hidden flex items-center justify-center bg-primary active:scale-90 transition-transform"
           >
             <span className="material-symbols-outlined text-secondary text-xl">menu</span>
           </button>
         </div>
-        <Link to="/home" className="font-headline text-2xl font-bold tracking-tighter text-surface flex items-center gap-0.5">
-          <span className="material-symbols-outlined text-xl text-secondary" style={{ fontVariationSettings: "'FILL' 1" }}>favorite</span>
-          <span className="uppercase">vc</span>
-        </Link>
         <Link to="/checkout" className="text-surface hover:opacity-80 transition-opacity active:scale-95 duration-150 ease-in-out relative">
           <div className="relative">
             <span className="material-symbols-outlined">shopping_cart</span>
@@ -139,10 +161,10 @@ export default function Catalog() {
               <div key={product.id} className="group flex flex-col">
                 <div className="aspect-3/4 bg-primary/40 overflow-hidden luxury-border relative rounded-xl mb-4 glass-card">
                   <Link to={`/product/${product.id}`}>
-                    <ProductImage alt={product.name} className="transition-opacity duration-700" src={product.image_url || product.img || 'https://picsum.photos/seed/product/400/600'} referrerPolicy="no-referrer" />
+                    <ProductImage alt={product.name} className="transition-opacity duration-700" src={product.image_url || product.img || product.image || 'https://picsum.photos/seed/product/400/600'} referrerPolicy="no-referrer" />
                   </Link>
                   <div className="absolute top-3 left-3 flex flex-col gap-1">
-                    {product.is_new ? (
+                    {(product.is_new || product.isNew) ? (
                       <span className="bg-secondary text-primary px-2 py-1 text-[8px] tracking-widest uppercase font-bold rounded-sm w-fit">Novidade</span>
                     ) : null}
                     {product.discount > 0 ? (
@@ -152,9 +174,7 @@ export default function Catalog() {
                   <button 
                     onClick={() => addItem(productToCartItem(
                       product,
-                      product.discount > 0
-                        ? (product.discounted_price ?? (product.sale_price ? product.sale_price * (1 - product.discount / 100) : product.sale_price))
-                        : product.sale_price
+                      calculateProductPrice(product)
                     ))}
                     className="absolute bottom-3 right-3 w-10 h-10 bg-primary/80 backdrop-blur-md rounded-full flex items-center justify-center text-surface opacity-0 translate-y-4 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300 hover:bg-secondary hover:text-primary active:scale-90"
                   >
@@ -167,27 +187,25 @@ export default function Catalog() {
                     <h3 className="font-headline text-lg text-surface leading-tight mb-2 grow hover:text-secondary transition-colors">{product.name}</h3>
                   </Link>
                   <div className="flex items-center gap-2 mb-4">
-                    <p className="text-sm font-medium text-secondary">R$ {(product.discount > 0 ? product.discounted_price : product.sale_price)?.toLocaleString('pt-BR')}</p>
+                    <p className="text-sm font-medium text-secondary">R$ {calculateProductPrice(product)?.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                     {product.discount > 0 ? (
-                      <p className="text-xs text-surface/40 line-through">R$ {product.sale_price?.toLocaleString('pt-BR')}</p>
+                      <p className="text-xs text-surface/40 line-through">R$ {(product.sale_price ?? product.price ?? 0)?.toLocaleString('pt-BR')}</p>
                     ) : null}
                   </div>
                   <button
                     onClick={() => addItem(productToCartItem(
                       product,
-                      product.discount > 0
-                        ? (product.discounted_price ?? (product.sale_price ? product.sale_price * (1 - product.discount / 100) : product.sale_price))
-                        : product.sale_price
+                      calculateProductPrice(product)
                     ))}
                     className={`w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-xs font-bold uppercase tracking-[0.15em] transition-all duration-200 ${
-                      product.stock > 0
+                      (product.stock ?? 1) > 0
                         ? 'bg-secondary text-primary hover:bg-secondary/90 active:scale-95 shadow-lg shadow-secondary/20'
                         : 'bg-surface/10 text-surface/40 cursor-not-allowed'
                     }`}
-                    disabled={product.stock <= 0}
+                    disabled={(product.stock ?? 1) <= 0}
                   >
                     <span className="material-symbols-outlined text-sm">shopping_cart</span>
-                    {product.stock > 0 ? 'Adicionar' : 'Esgotado'}
+                    {(product.stock ?? 1) > 0 ? 'Adicionar' : 'Esgotado'}
                   </button>
                 </div>
               </div>

@@ -1,86 +1,131 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { Bell } from 'lucide-react';
 import { motion } from 'motion/react';
-import { supabase } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { api } from '../services/api';
 
 export default function NotificationSino() {
-  // Variável que guarda a quantidade de notificações não lidas
   const [unreadCount, setUnreadCount] = useState(0);
 
-  // 1. Lógica de Busca de Dados (Mantida, pois já provou estar a funcionar perfeitamente)
   const fetchNotificationsFromDB = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from('notifications')
-        .select('id')
-        .eq('is_read', false);
+      if (isSupabaseConfigured) {
+        const { data, error } = await supabase
+          .from('notifications')
+          .select('id')
+          .eq('is_read', false);
 
-      if (error) throw error;
-
-      const totalNaoLidas = data ? data.length : 0;
-      setUnreadCount(totalNaoLidas);
-    } catch (error) {
-      console.error('Erro ao buscar notificações no Sino:', error);
+        if (!error && data) {
+          setUnreadCount(data.length);
+          return;
+        }
+      }
+      
+      const count = await api.notifications.getUnreadCount();
+      setUnreadCount(count);
+    } catch {
+      const count = await api.notifications.getUnreadCount();
+      setUnreadCount(count);
     }
   }, []);
 
-  // 2. Lógica de Tempo Real (Mantida)
   useEffect(() => {
     fetchNotificationsFromDB();
 
-    const channel = supabase
-      .channel('sino-inteligente')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'notifications' },
-        () => fetchNotificationsFromDB()
-      )
-      .subscribe();
+    // Listen to local notifications-updated events
+    const handleUpdate = () => {
+      fetchNotificationsFromDB();
+    };
+
+    window.addEventListener('notifications-updated', handleUpdate);
+    window.addEventListener('focus', handleUpdate);
+
+    // Periodic polling as a reliable backup
+    const interval = setInterval(fetchNotificationsFromDB, 5000);
+
+    let channel: any = null;
+    if (isSupabaseConfigured) {
+      try {
+        channel = supabase
+          .channel('sino-inteligente')
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'notifications' },
+            () => fetchNotificationsFromDB()
+          )
+          .subscribe();
+      } catch {
+        // ignore realtime errors in preview/offline mode
+      }
+    }
 
     return () => {
-      supabase.removeChannel(channel);
+      window.removeEventListener('notifications-updated', handleUpdate);
+      window.removeEventListener('focus', handleUpdate);
+      clearInterval(interval);
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
     };
   }, [fetchNotificationsFromDB]);
 
   return (
-    <Link to="/admin/notifications" className="relative group">
-      {/* 3. Contêiner Principal: Cuida apenas do Hover (Aumento ao passar o rato) */}
+    <Link 
+      to="/admin/notifications" 
+      aria-label={`Notificações: ${unreadCount} não lidas`}
+      className="relative group block"
+    >
+      {/* Contêiner Principal: Efeito Glass com Hover */}
       <motion.div
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
-        className="w-10 h-10 rounded-full bg-white/5 backdrop-blur-md border border-white/10 flex items-center justify-center transition-all duration-300 group-hover:bg-white/10 group-hover:border-white/20"
+        whileHover={{ scale: 1.08 }}
+        whileTap={{ scale: 0.94 }}
+        className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300 backdrop-blur-md border ${
+          unreadCount > 0 
+            ? 'bg-secondary/15 border-secondary/40 shadow-[0_0_15px_rgba(244,192,37,0.2)]' 
+            : 'bg-white/5 border-white/10 group-hover:bg-white/10 group-hover:border-white/20'
+        }`}
       >
-        
-        {/* 4. O Ícone do Sino: Isolado em um 'motion.div' apenas para cuidar do balanço */}
+        {/* Ícone do Sino com animação de balanço contínuo quando há mensagens */}
         <motion.div
-          animate={unreadCount > 0 ? { rotate: [0, -15, 15, -15, 15, 0] } : { rotate: 0 }}
+          animate={
+            unreadCount > 0
+              ? {
+                  rotate: [0, -20, 18, -16, 14, -8, 4, 0],
+                }
+              : { rotate: 0 }
+          }
           transition={{
-            // Se houver mensagens, repete para sempre com intervalo de 2 segundos.
-            // Se não houver, a duração é 0 (fica parado).
-            duration: unreadCount > 0 ? 0.6 : 0,
+            duration: 1.5,
             repeat: unreadCount > 0 ? Infinity : 0,
-            repeatDelay: 2,
+            repeatDelay: 0.6,
             ease: "easeInOut"
           }}
-          // O segredo do sino real: Eixo de rotação centralizado (originX) e no topo (originY)
-          style={{ originX: 0.5, originY: 0 }} 
+          style={{ transformOrigin: 'top center' }} 
+          className="flex items-center justify-center"
         >
           <Bell 
             size={20} 
-            className={`transition-colors duration-300 ${unreadCount > 0 ? 'text-white' : 'text-[#C5A059] group-hover:text-white'}`}
+            className={`transition-colors duration-300 ${
+              unreadCount > 0 ? 'text-secondary drop-shadow-[0_0_8px_rgba(244,192,37,0.6)]' : 'text-surface/60 group-hover:text-surface'
+            }`}
             strokeWidth={2}
           />
         </motion.div>
         
-        {/* 5. A Bolinha Vermelha: Agora ela fica estática enquanto o sino bate dentro do contêiner */}
+        {/* Contador no Sininho com pulso suave */}
         {unreadCount > 0 && (
           <motion.div 
             initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            className="absolute -top-1 -right-1 w-5 h-5 bg-[#FF4D4D] rounded-full flex items-center justify-center shadow-[0_0_10px_rgba(255,77,77,0.6)] border-2 border-[#0B111D]"
+            animate={{ scale: [1, 1.15, 1] }}
+            transition={{
+              duration: 1.8,
+              repeat: Infinity,
+              ease: "easeInOut"
+            }}
+            className="absolute -top-1 -right-1 min-w-[19px] h-[19px] px-1 bg-rose-500 rounded-full flex items-center justify-center shadow-[0_0_10px_rgba(244,63,94,0.8)] border-2 border-[#0B111D]"
           >
-            <span className="text-white text-[9px] font-bold">
+            <span className="text-white text-[9px] font-black leading-none tracking-tight">
               {unreadCount > 99 ? '99+' : unreadCount}
             </span>
           </motion.div>
@@ -89,3 +134,4 @@ export default function NotificationSino() {
     </Link>
   );
 }
+

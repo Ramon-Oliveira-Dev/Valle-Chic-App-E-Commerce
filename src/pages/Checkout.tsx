@@ -6,7 +6,12 @@ import OrderSuccessDialog from '../components/OrderSuccessDialog';
 import { supabase } from '../lib/supabase';
 import { toast } from 'sonner';
 
+import Sidebar from '../components/Sidebar';
+import { useTheme } from '../contexts/ThemeContext';
+
 export default function Checkout() {
+  const { isDesktopSidebarCollapsed } = useTheme();
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const { items, updateQuantity, removeItem, getTotalPrice, getTotalItems, clearCart } = useCartStore();
   const navigate = useNavigate();
   
@@ -133,13 +138,29 @@ export default function Checkout() {
   };
 
   return (
-    <div className="min-h-screen global-bg text-surface font-sans flex flex-col pb-24">
-      <header className="fixed top-0 left-0 right-0 z-50 flex items-center px-6 py-6 bar-fume border-b border-white/5">
-        <Link to="/catalog" className="text-secondary mr-4"><span className="material-symbols-outlined">arrow_back</span></Link>
-        <h1 className="font-headline italic text-2xl">Finalizar Pedido</h1>
+    <div className={`min-h-screen global-bg text-surface font-sans flex flex-col pb-24 ${isDesktopSidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-[240px]'} transition-all duration-300`}>
+      <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
+      
+      <header className={`fixed top-0 left-0 right-0 ${isDesktopSidebarCollapsed ? 'lg:left-[76px]' : 'lg:left-[240px]'} z-50 flex items-center px-6 py-4 bar-fume border-b border-white/5 transition-all duration-300`}>
+        <div className="flex items-center gap-4 w-full">
+          <button 
+            onClick={() => setIsSidebarOpen(true)}
+            className="lg:hidden text-secondary w-9 h-9 rounded-full bg-white/5 flex items-center justify-center mr-1"
+          >
+            <span className="material-symbols-outlined text-lg">menu</span>
+          </button>
+          <Link to="/catalog" className="text-secondary flex items-center justify-center mr-2">
+            <span className="material-symbols-outlined">arrow_back</span>
+          </Link>
+        </div>
       </header>
 
       <main className="flex-grow px-4 space-y-6 max-w-3xl mx-auto w-full pt-28">
+        {/* Title Block below header */}
+        <div className="mb-8">
+          <h1 className="font-headline italic text-4xl text-surface">Sacola <span className="text-secondary">VC</span></h1>
+          <p className="text-xs text-surface/50 tracking-wider uppercase mt-1">Sua sacola de compras exclusivas</p>
+        </div>
         {/* Itens do pedido */}
         <section className="space-y-4">
           {items.length === 0 ? (

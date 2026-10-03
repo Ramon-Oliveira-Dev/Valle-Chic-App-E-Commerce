@@ -1,16 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useCartStore } from '../store/cartStore';
-import { supabase } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { getFallbackProductById, getFallbackProducts } from '../data/products';
 import BottomNavigation from '../components/BottomNavigation';
 import MenuButton from '../components/MenuButton';
 import Sidebar from '../components/Sidebar';
 import ProductImage from '../components/ProductImage';
 import { productToCartItem } from '../lib/productMetadata';
+import { useTheme } from '../contexts/ThemeContext';
+import { motion } from 'framer-motion';
+import { ArrowLeft, ShoppingCart, Info, CheckCircle, Package } from 'lucide-react';
 
 export default function ProductDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { isDesktopSidebarCollapsed } = useTheme();
   const [product, setProduct] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -30,35 +35,58 @@ export default function ProductDetail() {
   const fetchProduct = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('products')
-        .select('*')
-        .eq('id', id)
-        .single();
+      let foundProduct: any = null;
+      let suggestionsList: any[] = [];
 
-      if (error) throw error;
-      
-      // Check if product is published and has stock
-      if (!data.published || data.stock <= 0) {
-        // Optionally redirect or show "Not Available"
-        // For now, let's just show it but maybe disable the "Add to Cart" button
+      if (isSupabaseConfigured) {
+        try {
+          const { data, error } = await supabase
+            .from('products')
+            .select('*')
+            .eq('id', id)
+            .single();
+
+          if (!error && data) {
+            foundProduct = data;
+          }
+
+          const { data: suggestions } = await supabase
+            .from('products')
+            .select('*')
+            .eq('published', true)
+            .gt('stock', 0)
+            .neq('id', id)
+            .limit(6);
+          
+          if (suggestions && suggestions.length > 0) {
+            suggestionsList = suggestions;
+          }
+        } catch (supabaseErr) {
+          console.warn('Supabase product detail query failed, falling back to local dataset:', supabaseErr);
+        }
       }
 
-      setProduct(data);
-      setActiveImage(data.image_url || data.img || 'https://picsum.photos/seed/product/800/600');
-      
-      // Fetch suggestions
-      const { data: suggestions } = await supabase
-        .from('products')
-        .select('*')
-        .eq('published', true)
-        .gt('stock', 0)
-        .neq('id', id)
-        .limit(6);
-      
-      setSuggestedProducts(suggestions || []);
+      if (!foundProduct) {
+        foundProduct = getFallbackProductById(id || '');
+      }
+
+      if (suggestionsList.length === 0) {
+        suggestionsList = getFallbackProducts().filter(p => p.id !== id).slice(0, 6);
+      }
+
+      setProduct(foundProduct);
+      if (foundProduct) {
+        setActiveImage(foundProduct.image_url || foundProduct.img || foundProduct.image || 'https://picsum.photos/seed/product/800/600');
+      }
+      setSuggestedProducts(suggestionsList);
     } catch (error) {
-      console.error('Error fetching product:', error);
+      console.warn('Error fetching product:', error);
+      const fallback = getFallbackProductById(id || '');
+      setProduct(fallback);
+      if (fallback) {
+        setActiveImage(fallback.image_url || fallback.img || fallback.image || 'https://picsum.photos/seed/product/800/600');
+      }
+      setSuggestedProducts(getFallbackProducts().filter(p => p.id !== id).slice(0, 6));
     } finally {
       setLoading(false);
     }
@@ -78,7 +106,7 @@ export default function ProductDetail() {
   if (!product) {
     return (
       <div className="global-bg min-h-screen flex flex-col items-center justify-center text-surface px-6 text-center">
-        <span className="material-symbols-outlined text-6xl text-secondary/20 mb-4">inventory_2</span>
+        <Package className="w-16 h-16 text-secondary/20 mb-4" />
         <h2 className="font-headline text-2xl mb-2">Produto não encontrado</h2>
         <p className="text-surface/60 mb-8 max-w-xs">O item que você procura pode ter sido removido ou não está mais disponível.</p>
         <Link to="/catalog" className="glass-button px-8 py-3 rounded-full text-sm font-bold">Voltar ao Catálogo</Link>
@@ -88,178 +116,161 @@ export default function ProductDetail() {
 
   const allImages = product.images && product.images.length > 0 
     ? product.images 
-    : [product.image_url || product.img || 'https://picsum.photos/seed/product/800/600'];
+    : [product.image_url || product.img || product.image || 'https://picsum.photos/seed/product/800/600'];
 
-  const hasDiscount = product.discount > 0;
-  const originalPrice = product.sale_price || product.original_price;
+  const hasDiscount = (product.discount || 0) > 0;
+  const originalPrice = product.sale_price ?? product.price ?? product.original_price;
   const displayPrice = hasDiscount
     ? (product.discounted_price ?? (originalPrice ? originalPrice * (1 - product.discount / 100) : originalPrice))
     : originalPrice;
 
   return (
-    <div className="global-bg text-surface font-body selection:bg-secondary/30 min-h-screen">
+    <div className={`global-bg text-surface font-body selection:bg-secondary/30 min-h-screen ${isDesktopSidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-[240px]'} transition-all duration-300`}>
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
       
-      {/* TopAppBar */}
-      <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-5 py-4 bar-fume border-b border-secondary/10 shadow-2xl shadow-slate-950/10 backdrop-blur-xl">
-        <MenuButton onClick={() => setIsSidebarOpen(true)} />
-
-        <Link to="/home" className="font-headline text-2xl font-bold tracking-tighter text-surface flex items-center gap-0.5">
-          <span className="material-symbols-outlined text-xl text-secondary" style={{ fontVariationSettings: "'FILL' 1" }}>favorite</span>
-          <span className="uppercase">vc</span>
-        </Link>
-
+      <header className={`fixed top-0 left-0 right-0 ${isDesktopSidebarCollapsed ? 'lg:left-[76px]' : 'lg:left-[240px]'} z-50 flex items-center justify-between px-6 py-4 bg-[#0F1420]/80 backdrop-blur-xl border-b border-white/5 shadow-2xl transition-all duration-300`}>
+        <div className="lg:hidden">
+          <MenuButton onClick={() => setIsSidebarOpen(true)} />
+        </div>
+        <div className="flex-1 text-center font-headline italic text-xl">Valle <span className="text-secondary">Chic</span></div>
         <Link to="/checkout" className="text-surface hover:opacity-80 transition-opacity active:scale-95 duration-150 ease-in-out relative">
-          <div className="relative">
-            <span className="material-symbols-outlined">shopping_cart</span>
-            {totalItems > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 bg-secondary text-primary text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full">
-                {totalItems}
-              </span>
-            )}
-          </div>
+          <ShoppingCart className="w-6 h-6" />
+          {totalItems > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 bg-secondary text-primary text-[10px] font-black w-4 h-4 flex items-center justify-center rounded-full">
+              {totalItems}
+            </span>
+          )}
         </Link>
       </header>
 
-      <main className="pb-32 editorial-gradient min-h-screen max-w-5xl mx-auto pt-24">
-        <div className="px-4 pt-4">
-          {/* Main Image Display */}
-          <div className="relative aspect-3/4 sm:aspect-video w-full rounded-2xl overflow-hidden glass-card mb-4">
-            <ProductImage 
-              src={activeImage} 
-              alt={product.name}
-              className="transition-all duration-500 h-full"
-              imageClassName="object-cover"
-              referrerPolicy="no-referrer"
-            />
-            <div className="absolute top-6 left-6 flex flex-col gap-2">
-              {product.discount > 0 ? (
-                <span className="bg-red-800/90 text-white px-4 py-2 text-xs tracking-widest uppercase font-bold rounded-full shadow-xl">
-                  {product.discount}% OFF
-                </span>
-              ) : null}
-              {product.is_new ? (
-                <span className="bg-secondary text-primary px-4 py-2 text-xs tracking-widest uppercase font-bold rounded-full shadow-xl">
-                  Novidade
-                </span>
-              ) : null}
-            </div>
-
-            <button
-              type="button"
-              onClick={() => product.stock > 0 && addItem(productToCartItem(product, displayPrice))}
-              disabled={product.stock <= 0}
-              aria-label="Adicionar ao carrinho"
-              title="Adicionar ao carrinho"
-              className={`absolute right-4 bottom-4 flex items-center justify-center w-16 h-16 rounded-full shadow-2xl transition-transform duration-200 ${product.stock > 0 ? 'bg-secondary text-primary hover:scale-105' : 'bg-surface/10 text-surface/40 cursor-not-allowed'} border border-secondary/20`}
+      <main className="max-w-7xl mx-auto pt-24 pb-32 px-4 sm:px-6 lg:px-8">
+        <div className="grid lg:grid-cols-2 gap-12">
+          {/* Coluna da Imagem */}
+          <div className="space-y-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="relative aspect-square w-full rounded-[32px] overflow-hidden bg-[#161D2F]/50 border border-white/5 shadow-2xl"
             >
-              <span className="material-symbols-outlined text-2xl">shopping_cart</span>
-            </button>
-            <div className="absolute right-4 bottom-24 max-w-55 rounded-full bg-surface/10 border border-secondary/15 px-3 py-2 text-[11px] uppercase tracking-[0.35em] text-surface/70 shadow-lg backdrop-blur-md hidden sm:flex items-center gap-2">
-              <span className="material-symbols-outlined text-sm">touch_app</span>
-              Toque para adicionar à sacola
-            </div>
+              <ProductImage 
+                src={activeImage} 
+                alt={product.name}
+                className="w-full h-full"
+                imageClassName="object-cover"
+                referrerPolicy="no-referrer"
+              />
+              <div className="absolute top-6 left-6 flex flex-col gap-2">
+                {hasDiscount && (
+                  <span className="bg-rose-500/90 backdrop-blur-md text-white px-4 py-1.5 text-[10px] tracking-[0.2em] uppercase font-black rounded-full">
+                    -{product.discount}%
+                  </span>
+                )}
+                {product.is_new && (
+                  <span className="bg-secondary text-primary px-4 py-1.5 text-[10px] tracking-[0.2em] uppercase font-black rounded-full">
+                    Novo
+                  </span>
+                )}
+              </div>
+            </motion.div>
+
+            {allImages.length > 1 && (
+              <div className="flex gap-4 overflow-x-auto no-scrollbar">
+                {allImages.map((img: string, idx: number) => (
+                  <button 
+                    key={idx}
+                    onClick={() => setActiveImage(img)}
+                    className={`w-24 h-24 rounded-2xl overflow-hidden shrink-0 border-2 transition-all duration-300 ${activeImage === img ? 'border-secondary scale-105' : 'border-white/5 hover:border-white/20'}`}
+                  >
+                    <ProductImage src={img} alt={`${product.name} ${idx + 1}`} referrerPolicy="no-referrer" />
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
-          {/* Thumbnail Gallery */}
-          {allImages.length > 1 && (
-            <div className="flex gap-3 overflow-x-auto no-scrollbar pb-4 mb-4">
-              {allImages.map((img: string, idx: number) => (
-                <button 
-                  key={idx}
-                  onClick={() => setActiveImage(img)}
-                  className={`w-20 h-20 rounded-xl overflow-hidden shrink-0 border-2 transition-all ${activeImage === img ? 'border-secondary scale-105' : 'border-transparent opacity-60'}`}
-                >
-                  <ProductImage src={img} alt={`${product.name} ${idx + 1}`} referrerPolicy="no-referrer" />
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div className="px-2">
-            <p className="text-secondary text-xs uppercase tracking-[0.3em] font-bold mb-2">{product.brand || 'Valle Chic'}</p>
-            <h2 className="font-headline text-4xl text-surface mb-4 leading-tight">{product.name}</h2>
-            
-            <div className="flex items-center gap-4 mb-4 flex-wrap">
-              <span className="text-3xl font-headline italic text-secondary">
-                R$ {displayPrice?.toLocaleString('pt-BR')}
-              </span>
-              {hasDiscount && originalPrice ? (
-                <div className="flex items-center gap-3">
-                  <span className="text-lg text-surface/40 line-through">
-                    R$ {originalPrice.toLocaleString('pt-BR')}
-                  </span>
-                  <span className="px-3 py-1 rounded-full text-xs font-bold tracking-widest bg-red-800/90 text-white">
-                    -{product.discount}% OFF
-                  </span>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="flex items-center gap-2 mb-8">
-              <span className={`w-2 h-2 rounded-full ${product.stock > 0 ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
-              <span className="text-xs uppercase tracking-widest font-bold text-surface/60">
-                {product.stock > 0 ? `${product.stock} em estoque` : 'Sem estoque'}
-              </span>
-            </div>
-
-            <div className="glass-card p-6 rounded-2xl mb-8 border border-secondary/10">
-              <h3 className="font-headline text-xl mb-4 text-surface/90">Descrição</h3>
-              <p className="text-surface/60 leading-relaxed text-sm">
-                {product.description || 'Nenhuma descrição disponível para este produto de luxo.'}
-              </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <button
-                type="button"
-                onClick={() => product.stock > 0 && addItem(productToCartItem(product, displayPrice))}
-                disabled={product.stock <= 0}
-                className={`w-full inline-flex items-center justify-center gap-2 px-6 py-5 rounded-full text-sm font-bold uppercase tracking-[0.2em] shadow-2xl transition-all duration-200 ${
-                  product.stock > 0
-                    ? 'bg-secondary text-primary hover:bg-secondary/90 active:scale-95'
-                    : 'bg-surface/10 text-surface/40 cursor-not-allowed'
-                }`}
-              >
-                <span className="material-symbols-outlined">shopping_cart</span>
-                Adicionar
-              </button>
+          {/* Coluna da Informação */}
+          <div className="flex flex-col justify-center">
+            <motion.div 
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.2 }}
+            >
+              <p className="text-secondary text-[10px] uppercase tracking-[0.3em] font-black mb-3">{product.brand || 'Valle Chic'}</p>
+              <h1 className="font-headline text-5xl text-white mb-6 leading-tight">{product.name}</h1>
               
-              <Link 
-                to="/catalog"
-                className="w-full inline-flex items-center justify-center gap-2 px-6 py-5 rounded-full border border-secondary/20 bg-white/5 text-surface/90 text-sm font-bold uppercase tracking-[0.2em] hover:bg-secondary/10 transition-all duration-200"
-              >
-                <span className="material-symbols-outlined">arrow_back</span>
-                Voltar
-              </Link>
-            </div>
+              <div className="flex items-baseline gap-4 mb-8">
+                <span className="text-4xl font-headline italic font-black text-white">
+                  R$ {displayPrice?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </span>
+                {hasDiscount && originalPrice && (
+                  <span className="text-xl text-surface/30 line-through">
+                    R$ {originalPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 mb-8 bg-white/5 rounded-full px-4 py-2 w-fit border border-white/5">
+                <div className={`w-2 h-2 rounded-full ${product.stock > 0 ? 'bg-emerald-500' : 'bg-rose-500'}`}></div>
+                <span className="text-[10px] uppercase tracking-[0.2em] font-black text-surface/50">
+                  {product.stock > 0 ? `${product.stock} disponíveis` : 'Sem estoque'}
+                </span>
+              </div>
+
+              <div className="bg-[#161D2F]/50 p-8 rounded-[32px] mb-8 border border-white/5">
+                <h3 className="font-black text-xs uppercase tracking-[0.2em] text-secondary mb-4 flex items-center gap-2">
+                  <Info className="w-4 h-4" /> Descrição
+                </h3>
+                <p className="text-surface/60 leading-relaxed text-sm">
+                  {product.description || 'Nenhuma descrição disponível para este produto de luxo.'}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <button
+                  type="button"
+                  onClick={() => product.stock > 0 && addItem(productToCartItem(product, displayPrice))}
+                  disabled={product.stock <= 0}
+                  className={`group w-full inline-flex items-center justify-center gap-3 px-8 py-5 rounded-[20px] text-xs font-black uppercase tracking-[0.2em] transition-all duration-300 ${
+                    product.stock > 0
+                      ? 'bg-secondary text-primary hover:bg-white active:scale-95 shadow-lg shadow-secondary/20'
+                      : 'bg-white/5 text-surface/30 cursor-not-allowed'
+                  }`}
+                >
+                  <ShoppingCart className="w-4 h-4" />
+                  Adicionar
+                </button>
+                
+                <Link 
+                  to="/catalog"
+                  className="w-full inline-flex items-center justify-center gap-3 px-8 py-5 rounded-[20px] border border-white/10 bg-white/5 text-surface/70 text-xs font-black uppercase tracking-[0.2em] hover:bg-white/10 transition-all duration-300"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  Voltar
+                </Link>
+              </div>
+            </motion.div>
           </div>
         </div>
 
         {/* Sugestões */}
         {suggestedProducts.length > 0 && (
-          <section className="mt-16 px-6">
-            <h4 className="font-headline text-2xl text-surface mb-6">Você também pode gostar</h4>
-            <div className="flex overflow-x-auto no-scrollbar gap-4 pb-4">
+          <section className="mt-24">
+            <h4 className="font-headline text-3xl text-white mb-10 text-center">Você também pode gostar</h4>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6">
               {suggestedProducts.map(p => (
-                <Link key={p.id} to={`/product/${p.id}`} className="shrink-0 w-[40vw] sm:w-40">
-                  <div className="aspect-3/4 rounded-xl overflow-hidden glass-card mb-2">
-                    <ProductImage src={p.image_url || p.img} alt={p.name} referrerPolicy="no-referrer" />
-                    {p.discount > 0 ? (
-                      <div className="absolute top-2 left-2">
-                        <span className="bg-red-800/90 text-white px-2 py-1 text-[9px] tracking-widest uppercase font-bold rounded-sm">
-                          -{p.discount}% OFF
-                        </span>
+                <Link key={p.id} to={`/product/${p.id}`} className="group block">
+                  <div className="aspect-square rounded-[24px] overflow-hidden bg-[#161D2F]/50 border border-white/5 mb-4 relative">
+                    <ProductImage src={p.image_url || p.img} alt={p.name} className="group-hover:scale-105 transition-transform duration-500" referrerPolicy="no-referrer" />
+                    {p.discount > 0 && (
+                      <div className="absolute top-3 left-3 bg-rose-500/90 backdrop-blur-md text-white px-2 py-1 text-[8px] tracking-[0.1em] uppercase font-black rounded-full">
+                        -{p.discount}%
                       </div>
-                    ) : null}
+                    )}
                   </div>
-                  <p className="text-[10px] text-surface/80 font-medium truncate">{p.name}</p>
-                  <p className="text-secondary text-xs font-headline italic">
-                    R$ {(p.discount > 0 ? (p.discounted_price ?? (p.sale_price ? p.sale_price * (1 - p.discount / 100) : p.sale_price)) : p.sale_price)?.toLocaleString('pt-BR')}
+                  <p className="text-[10px] text-surface/60 font-medium mb-1 truncate">{p.name}</p>
+                  <p className="text-secondary text-xs font-black font-headline italic">
+                    R$ {(p.discount > 0 ? (p.discounted_price ?? (p.sale_price ? p.sale_price * (1 - p.discount / 100) : p.sale_price)) : p.sale_price)?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                   </p>
-                  {p.discount > 0 && p.sale_price ? (
-                    <p className="text-[10px] text-surface/40 line-through">R$ {p.sale_price.toLocaleString('pt-BR')}</p>
-                  ) : null}
                 </Link>
               ))}
             </div>
