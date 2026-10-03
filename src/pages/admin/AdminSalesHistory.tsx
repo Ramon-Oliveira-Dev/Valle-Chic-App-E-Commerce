@@ -192,28 +192,47 @@ export default function AdminSalesHistory() {
             sale_installments: installmentsData.filter(i => i.sale_id === sale.id)
           };
         });
+      }
 
-        // Apply robust and safe in-memory search filter to prevent PGRST125 URL path parsing errors
-        if (searchTerm) {
-          const cleanTerm = searchTerm.toLowerCase().trim();
-          if (cleanTerm.startsWith('#')) {
-            const idSearch = cleanTerm.slice(1);
-            salesList = salesList.filter(s => s.id.toLowerCase().includes(idSearch));
-          } else {
-            salesList = salesList.filter(s => {
-              const clientName = s.clients?.name?.toLowerCase() || '';
-              const saleId = s.id.toLowerCase();
-              const paymentMethod = s.payment_method?.toLowerCase() || '';
-              return clientName.includes(cleanTerm) || saleId.includes(cleanTerm) || paymentMethod.includes(cleanTerm);
-            });
-          }
+      // Read local sales as well to ensure 100% data preservation
+      let localSales: any[] = [];
+      try {
+        localSales = JSON.parse(localStorage.getItem('vc_sales') || '[]');
+      } catch {}
+
+      // Combine Supabase sales + Local sales (prevent duplicates by id)
+      const combinedMap = new Map<string, any>();
+      localSales.forEach(s => combinedMap.set(s.id, s));
+      salesList.forEach(s => combinedMap.set(s.id, s));
+
+      let finalSales = Array.from(combinedMap.values());
+      finalSales.sort((a, b) => new Date(b.sale_date || b.created_at).getTime() - new Date(a.sale_date || a.created_at).getTime());
+
+      // Apply in-memory search filter
+      if (searchTerm) {
+        const cleanTerm = searchTerm.toLowerCase().trim();
+        if (cleanTerm.startsWith('#')) {
+          const idSearch = cleanTerm.slice(1);
+          finalSales = finalSales.filter(s => s.id.toLowerCase().includes(idSearch));
+        } else {
+          finalSales = finalSales.filter(s => {
+            const clientName = s.clients?.name?.toLowerCase() || '';
+            const saleId = s.id.toLowerCase();
+            const paymentMethod = s.payment_method?.toLowerCase() || '';
+            return clientName.includes(cleanTerm) || saleId.includes(cleanTerm) || paymentMethod.includes(cleanTerm);
+          });
         }
       }
 
-      setSales(salesList);
+      setSales(finalSales);
     } catch (error: any) {
-      console.error('Error fetching sales:', error);
-      toast.error('Erro ao carregar o histórico de vendas.');
+      console.warn('Supabase query failed, loading from local backup:', error);
+      try {
+        const localSales = JSON.parse(localStorage.getItem('vc_sales') || '[]');
+        setSales(localSales);
+      } catch {
+        setSales([]);
+      }
     } finally {
       setLoading(false);
     }

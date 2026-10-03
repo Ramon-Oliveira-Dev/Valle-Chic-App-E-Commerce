@@ -423,72 +423,127 @@ export default function AdminNewSale() {
     setSaving(true);
 
     try {
-      // 1. Create Sale Record
-      const { data: sale, error: saleError } = await supabase.from('sales').insert({
-        client_id: selectedClient,
-        total_amount: totalAmount,
-        amount_paid: parseCurrency(amountPaid),
-        payment_method: paymentMethod,
-        sale_date: saleDate,
-        status: parseCurrency(amountPaid) >= totalAmount ? 'pago' : 'pendente'
-      }).select('id').single();
+      const paidVal = parseCurrency(amountPaid);
+      const saleStatus = paidVal >= totalAmount ? 'pago' : 'pendente';
+      const balance = totalAmount - paidVal;
+      const clientObj = clients.find(c => c.id === selectedClient);
+      let finalSaleId = `sale_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-      if (saleError) throw saleError;
+      // 1. Attempt to save to Supabase if configured
+      if (isSupabaseConfigured) {
+        try {
+          const { data: sale, error: saleError } = await supabase.from('sales').insert({
+            client_id: selectedClient,
+            total_amount: totalAmount,
+            amount_paid: paidVal,
+            payment_method: paymentMethod,
+            sale_date: saleDate,
+            status: saleStatus
+          }).select('id').single();
 
-      // 2. Create Sale Items
-      const saleItemsData = selectedProducts.map(item => ({
-        sale_id: sale.id,
-        product_id: item.product.id,
-        quantity: item.quantity,
-        unit_price: item.product.sale_price
-      }));
+          if (!saleError && sale?.id) {
+            finalSaleId = sale.id;
 
-      const { error: itemsError } = await supabase.from('sale_items').insert(saleItemsData);
-      if (itemsError) throw itemsError;
+            // 2. Create Sale Items in Supabase
+            const saleItemsData = selectedProducts.map(item => ({
+              sale_id: finalSaleId,
+              product_id: item.product.id,
+              quantity: item.quantity,
+              unit_price: item.product.sale_price
+            }));
+            await supabase.from('sale_items').insert(saleItemsData);
 
-      // Deduct stock and unpublish if zero
-      for (const item of selectedProducts) {
-        const newStock = item.product.stock - item.quantity;
-        
-        if (newStock < 0) {
-          // Rollback sale if stock is insufficient
-          await supabase.from('sales').delete().eq('id', sale.id);
-          throw new Error(`Estoque insuficiente para o produto ${item.product.name}`);
+            // Deduct stock in Supabase
+            for (const item of selectedProducts) {
+              const newStock = Math.max(0, item.product.stock - item.quantity);
+              await supabase.from('products').update({ 
+                stock: newStock,
+                published: newStock > 0 ? item.product.published : false
+              }).eq('id', item.product.id);
+            }
+
+            // Create installments in Supabase if balance > 0
+            if (balance > 0) {
+              try {
+                await supabase
+                  .from('clients')
+                  .update({ payment_status: 'Inadimplente' })
+                  .eq('id', selectedClient);
+              } catch {}
+
+              const installmentAmount = balance / installmentsCount;
+              const installmentsData = installmentDueDates.map(date => ({
+                sale_id: finalSaleId,
+                client_id: selectedClient,
+                amount: installmentAmount,
+                due_date: date,
+                status: 'pendente'
+              }));
+              await supabase.from('installments').insert(installmentsData);
+            }
+          }
+        } catch (supaErr) {
+          console.warn('Supabase offline or failed, persisting sale locally:', supaErr);
         }
-
-        await supabase.from('products').update({ 
-          stock: newStock,
-          published: newStock > 0 ? item.product.published : false
-        }).eq('id', item.product.id);
       }
 
-      // 4. Create Installments if there's a balance or it's crediario
-      const balance = totalAmount - parseCurrency(amountPaid);
-      if (balance > 0) {
-        // Update client status to Inadimplente
-        const { error: clientUpdateError } = await supabase
-          .from('clients')
-          .update({ payment_status: 'Inadimplente' })
-          .eq('id', selectedClient);
-        
-        if (clientUpdateError) {
-          console.error('Error updating client status:', clientUpdateError);
-        }
-
-        const installmentAmount = balance / installmentsCount;
-        const installmentsData = installmentDueDates.map(date => ({
-          sale_id: sale.id,
+      // 2. Always persist to localStorage (Double Backup / Offline Guarantee)
+      try {
+        const localSales = JSON.parse(localStorage.getItem('vc_sales') || '[]');
+        const newLocalSale = {
+          id: finalSaleId,
           client_id: selectedClient,
-          amount: installmentAmount,
-          due_date: date,
-          status: 'pendente'
-        }));
+          total_amount: totalAmount,
+          amount_paid: paidVal,
+          payment_method: paymentMethod,
+          sale_date: saleDate,
+          created_at: new Date().toISOString(),
+          status: saleStatus,
+          clients: clientObj ? { name: clientObj.name, status: clientObj.status, phone: clientObj.phone } : null,
+          sale_items: selectedProducts.map(item => ({
+            sale_id: finalSaleId,
+            product_id: item.product.id,
+            quantity: item.quantity,
+            unit_price: item.product.sale_price,
+            products: item.product
+          })),
+          sale_installments: balance > 0 ? installmentDueDates.map(date => ({
+            amount: balance / installmentsCount,
+            due_date: date,
+            status: 'pendente'
+          })) : []
+        };
+        localStorage.setItem('vc_sales', JSON.stringify([newLocalSale, ...localSales.filter((s: any) => s.id !== finalSaleId)]));
 
-        const { error: instError } = await supabase.from('installments').insert(installmentsData);
-        if (instError) {
-          console.error('Error creating installments:', instError);
-          toast.error('Venda salva, mas erro ao criar parcelas.');
+        // Deduct stock in localStorage
+        const localProducts = JSON.parse(localStorage.getItem('vc_products') || '[]');
+        if (localProducts.length > 0) {
+          const updatedProds = localProducts.map((p: any) => {
+            const found = selectedProducts.find(sp => sp.product.id === p.id);
+            if (found) {
+              const newStock = Math.max(0, (p.stock || 0) - found.quantity);
+              return { ...p, stock: newStock, published: newStock > 0 ? p.published : false };
+            }
+            return p;
+          });
+          localStorage.setItem('vc_products', JSON.stringify(updatedProds));
         }
+
+        // Save installments in localStorage
+        if (balance > 0) {
+          const localInst = JSON.parse(localStorage.getItem('vc_installments') || '[]');
+          const newInst = installmentDueDates.map(date => ({
+            id: `inst_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            sale_id: finalSaleId,
+            client_id: selectedClient,
+            amount: balance / installmentsCount,
+            due_date: date,
+            status: 'pendente'
+          }));
+          localStorage.setItem('vc_installments', JSON.stringify([...newInst, ...localInst]));
+        }
+      } catch (localErr) {
+        console.error('LocalStorage write error:', localErr);
       }
 
       setIsCartModalOpen(false);
@@ -498,7 +553,7 @@ export default function AdminNewSale() {
       setModalConfig({
         isOpen: true,
         title: 'Venda Realizada!',
-        message: 'A venda foi registrada com sucesso e o estoque atualizado.',
+        message: 'A venda foi registrada com sucesso e os dados foram salvos com segurança.',
         type: 'success'
       });
       

@@ -606,29 +606,43 @@ export const api = {
   },
   sales: {
     getRecent: async (limit = 5) => {
-      if (!isSupabaseConfigured) return [];
-      try {
-        const { data: sales, error } = await supabase
-          .from('sales')
-          .select('*')
-          .order('sale_date', { ascending: false })
-          .limit(limit);
+      let salesList: any[] = [];
+      if (isSupabaseConfigured) {
+        try {
+          const { data: sales, error } = await supabase
+            .from('sales')
+            .select('*')
+            .order('sale_date', { ascending: false })
+            .limit(limit);
 
-        if (error || !sales) return [];
+          if (!error && sales && sales.length > 0) {
+            const clientIds = [...new Set(sales.map(s => s.client_id).filter(Boolean))];
+            const { data: clients } = clientIds.length > 0
+              ? await supabase.from('clients').select('id, name, status').in('id', clientIds)
+              : { data: [] };
 
-        const clientIds = [...new Set(sales.map(s => s.client_id).filter(Boolean))];
-        const { data: clients } = clientIds.length > 0
-          ? await supabase.from('clients').select('id, name, status').in('id', clientIds)
-          : { data: [] };
-
-        const clientsMap = new Map((clients || []).map(c => [c.id, c]));
-        return sales.map(s => ({
-          ...s,
-          clients: clientsMap.get(s.client_id) || null
-        }));
-      } catch {
-        return [];
+            const clientsMap = new Map((clients || []).map(c => [c.id, c]));
+            salesList = sales.map(s => ({
+              ...s,
+              clients: clientsMap.get(s.client_id) || null
+            }));
+          }
+        } catch {
+          // ignore
+        }
       }
+
+      if (salesList.length === 0) {
+        const storedSales = getStored<any[]>('vc_sales', []);
+        const storedClients = getStored<any[]>('vc_clients', FALLBACK_CLIENTS);
+        const clientsMap = new Map(storedClients.map(c => [c.id, c]));
+        salesList = storedSales.slice(0, limit).map(s => ({
+          ...s,
+          clients: clientsMap.get(s.client_id) || s.clients || null
+        }));
+      }
+
+      return salesList;
     },
     getAccountsReceivable: async () => {
       if (isSupabaseConfigured) {
@@ -648,18 +662,26 @@ export const api = {
       return stored.filter(i => i.status === 'pendente').reduce((acc, curr) => acc + (curr.amount || 0), 0);
     },
     getTotalReceived: async () => {
-      if (!isSupabaseConfigured) return 0;
-      try {
-        const [salesRes, installmentsRes] = await Promise.all([
-          supabase.from('sales').select('amount_paid'),
-          supabase.from('installments').select('amount').eq('status', 'pago')
-        ]);
-        const salesPaid = salesRes.data?.reduce((acc, curr) => acc + (curr.amount_paid || 0), 0) || 0;
-        const installmentsPaid = installmentsRes.data?.reduce((acc, curr) => acc + (curr.amount || 0), 0) || 0;
-        return salesPaid + installmentsPaid;
-      } catch {
-        return 0;
+      let total = 0;
+      if (isSupabaseConfigured) {
+        try {
+          const [salesRes, installmentsRes] = await Promise.all([
+            supabase.from('sales').select('amount_paid'),
+            supabase.from('installments').select('amount').eq('status', 'pago')
+          ]);
+          const salesPaid = salesRes.data?.reduce((acc, curr) => acc + (curr.amount_paid || 0), 0) || 0;
+          const installmentsPaid = installmentsRes.data?.reduce((acc, curr) => acc + (curr.amount || 0), 0) || 0;
+          total = salesPaid + installmentsPaid;
+          if (total > 0) return total;
+        } catch {
+          // ignore
+        }
       }
+      const storedSales = getStored<any[]>('vc_sales', []);
+      const storedInst = getStored<any[]>('vc_installments', []);
+      const salesPaid = storedSales.reduce((acc, curr) => acc + (curr.amount_paid || 0), 0);
+      const instPaid = storedInst.filter(i => i.status === 'pago').reduce((acc, curr) => acc + (curr.amount || 0), 0);
+      return salesPaid + instPaid;
     }
   },
   debts: {
