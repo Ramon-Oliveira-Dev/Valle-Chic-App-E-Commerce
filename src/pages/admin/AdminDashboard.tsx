@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Calendar, User, ChevronRight, UserMinus, CheckCircle, UserCheck, AlertTriangle, ArrowRight, Gift, Sparkles, Download, Upload } from 'lucide-react';
+import { Calendar, User, ChevronRight, UserMinus, CheckCircle, UserCheck, AlertTriangle, ArrowRight, Gift, Sparkles } from 'lucide-react';
 import Sidebar from '../../components/Sidebar';
 import BottomNavigation from '../../components/BottomNavigation';
 import jsPDF from 'jspdf';
@@ -35,67 +35,7 @@ export default function AdminDashboard() {
   const [dbStatus, setDbStatus] = useState<'online' | 'offline' | 'checking'>('checking');
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const carouselRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const stockCarouselRef = useRef<HTMLDivElement>(null);
-
-  const handleExportBackup = () => {
-    try {
-      const backupData = {
-        version: '1.0',
-        timestamp: new Date().toISOString(),
-        products: localStorage.getItem('vc_products') ? JSON.parse(localStorage.getItem('vc_products')!) : [],
-        sales: localStorage.getItem('vc_sales') ? JSON.parse(localStorage.getItem('vc_sales')!) : [],
-        clients: localStorage.getItem('vc_clients') ? JSON.parse(localStorage.getItem('vc_clients')!) : [],
-        debts: localStorage.getItem('vc_debts') ? JSON.parse(localStorage.getItem('vc_debts')!) : [],
-        mimos: localStorage.getItem('vc_mimos') ? JSON.parse(localStorage.getItem('vc_mimos')!) : [],
-        notifications: localStorage.getItem('vc_notifications') ? JSON.parse(localStorage.getItem('vc_notifications')!) : [],
-        logs: localStorage.getItem('vc_logs') ? JSON.parse(localStorage.getItem('vc_logs')!) : [],
-      };
-
-      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
-      const downloadAnchor = document.createElement('a');
-      downloadAnchor.setAttribute("href", dataStr);
-      downloadAnchor.setAttribute("download", `valle-chic-backup-${new Date().toISOString().slice(0, 10)}.json`);
-      document.body.appendChild(downloadAnchor);
-      downloadAnchor.click();
-      downloadAnchor.remove();
-      toast.success('Backup exportado com sucesso! Seus dados estão salvos para o deploy.');
-    } catch (e) {
-      console.error(e);
-      toast.error('Erro ao exportar backup.');
-    }
-  };
-
-  const handleImportBackup = (event: any) => {
-    const fileReader = new FileReader();
-    if (event.target.files && event.target.files[0]) {
-      fileReader.readAsText(event.target.files[0], "UTF-8");
-      fileReader.onload = (e) => {
-        try {
-          const parsed = JSON.parse(e.target?.result as string);
-          if (parsed && typeof parsed === 'object') {
-            if (parsed.products) localStorage.setItem('vc_products', JSON.stringify(parsed.products));
-            if (parsed.sales) localStorage.setItem('vc_sales', JSON.stringify(parsed.sales));
-            if (parsed.clients) localStorage.setItem('vc_clients', JSON.stringify(parsed.clients));
-            if (parsed.debts) localStorage.setItem('vc_debts', JSON.stringify(parsed.debts));
-            if (parsed.mimos) localStorage.setItem('vc_mimos', JSON.stringify(parsed.mimos));
-            if (parsed.notifications) localStorage.setItem('vc_notifications', JSON.stringify(parsed.notifications));
-            if (parsed.logs) localStorage.setItem('vc_logs', JSON.stringify(parsed.logs));
-
-            toast.success('Backup restaurado com sucesso! Atualizando sistema...');
-            setTimeout(() => {
-              window.location.reload();
-            }, 1000);
-          } else {
-            toast.error('Arquivo de backup inválido.');
-          }
-        } catch (err) {
-          console.error(err);
-          toast.error('Erro ao ler arquivo de backup.');
-        }
-      };
-    }
-  };
 
   useEffect(() => {
     fetchDashboardData();
@@ -338,55 +278,11 @@ export default function AdminDashboard() {
         </header>
 
         <div className="px-4 sm:px-6 lg:px-8 max-w-[1600px] mx-auto pt-24 pb-8">
-          <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <h2 className="font-headline text-3xl italic">Dashboard</h2>
-              <p className="text-surface/40 text-[10px] uppercase tracking-[0.2em] font-bold mt-1">
-                Visão geral do negócio e métricas executivas
-              </p>
-            </div>
-
-            {/* Vercel / Cloud Backup & Restore Banner */}
-            <div className="bg-[#0F1420]/95 backdrop-blur-2xl rounded-[18px] p-3 sm:px-4 sm:py-2.5 border border-secondary/30 shadow-md flex items-center justify-between gap-3 shrink-0">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-secondary/15 text-secondary border border-secondary/30 flex items-center justify-center shrink-0">
-                  <Download className="w-3.5 h-3.5" />
-                </div>
-                <div>
-                  <h3 className="font-headline text-xs sm:text-sm italic text-white font-bold leading-tight">Backup para Vercel</h3>
-                  <p className="text-[9px] text-surface/50">Salve ou restaure seus dados</p>
-                </div>
-              </div>
-              
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={handleExportBackup}
-                  className="px-3 py-1.5 rounded-xl bg-secondary text-primary font-bold text-[10px] uppercase tracking-wider hover:bg-white transition-all shadow-sm flex items-center gap-1 cursor-pointer"
-                  title="Exportar Backup (.json)"
-                >
-                  <Download className="w-3 h-3" />
-                  <span>Baixar</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="px-3 py-1.5 rounded-xl bg-secondary/15 hover:bg-secondary hover:text-primary text-secondary border border-secondary/40 font-bold text-[10px] uppercase tracking-wider transition-all shadow-sm flex items-center gap-1 cursor-pointer"
-                  title="Restaurar Backup"
-                >
-                  <Upload className="w-3 h-3" />
-                  <span>Restaurar</span>
-                </button>
-                <input 
-                  type="file" 
-                  ref={fileInputRef} 
-                  onChange={handleImportBackup} 
-                  accept=".json" 
-                  className="hidden" 
-                />
-              </div>
-            </div>
+          <div className="mb-6">
+            <h2 className="font-headline text-3xl italic">Dashboard</h2>
+            <p className="text-surface/40 text-[10px] uppercase tracking-[0.2em] font-bold mt-1">
+              Visão geral do negócio e métricas executivas
+            </p>
           </div>
 
           {/* Stats Grid - Ultra Compact & Organized */}
